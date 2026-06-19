@@ -6,8 +6,8 @@ name: Build tvOS IPA
 
 on:
   push:
-    paths: ["tvos/**", ".github/workflows/build-tvos.yml"]
-  workflow_dispatch: {}
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
