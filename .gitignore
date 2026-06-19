@@ -1,0 +1,18 @@
+# Xcode / build
+tvos/TikTokTV.xcodeproj/
+tvos/build/
+DerivedData/
+*.xcarchive
+*.ipa
+
+# Node
+node_modules/
+
+# Secrets / login state — never commit
+backend/auth/sessionid.txt
+backend/auth/cookies.txt
+backend/auth/session.json
+backend/auth/chrome-profile/
+
+# OS
+.DS_Store

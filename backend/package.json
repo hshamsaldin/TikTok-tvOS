@@ -1,0 +1,10 @@
+{
+  "name": "tiktok-appletv-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Feed proxy that turns TikTok sources into clean JSON + playable MP4 URLs for a native tvOS client.",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

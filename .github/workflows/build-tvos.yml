@@ -1,0 +1,50 @@
+name: Build tvOS IPA
+
+# Builds an UNSIGNED .ipa on a cloud macOS runner.
+# You don't need an Apple Developer account or signing certs here —
+# Sideloadly re-signs the IPA with your free Apple ID when it installs.
+
+on:
+  push:
+    paths: ["tvos/**", ".github/workflows/build-tvos.yml"]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: tvos
+        run: xcodegen generate
+
+      - name: Build unsigned archive
+        working-directory: tvos
+        run: |
+          xcodebuild \
+            -project TikTokTV.xcodeproj \
+            -scheme TikTokTV \
+            -configuration Release \
+            -sdk appletvos \
+            -destination 'generic/platform=tvOS' \
+            -archivePath build/TikTokTV.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Package into .ipa
+        working-directory: tvos
+        run: |
+          mkdir -p build/Payload
+          cp -R build/TikTokTV.xcarchive/Products/Applications/TikTokTV.app build/Payload/
+          (cd build && zip -qry TikTokTV-unsigned.ipa Payload)
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TikTokTV-unsigned-ipa
+          path: tvos/build/TikTokTV-unsigned.ipa
+          if-no-files-found: error

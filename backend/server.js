@@ -1,0 +1,328 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { PYTHON as PY } from './config.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Locate the bundled ffmpeg so yt-dlp can merge separate video+audio streams
+// (without it, some clips download video-only = no sound).
+let FFMPEG = '';
+try {
+  FFMPEG = execFileSync(PY, ['-c', 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())'])
+    .toString().trim();
+} catch {
+  console.warn('ffmpeg not found — some clips may lack audio. `pip install imageio-ffmpeg`');
+}
+import { listSource, resolveVideo, listUserGrid } from './ytdlp.js';
+import { fetchForYou } from './foryou.js';
+import { fetchComments } from './comments.js';
+import { fetchProfile } from './profile.js';
+import {
+  SOURCES, PER_SOURCE, FEED_TTL_MS, VIDEO_TTL_MS,
+  RESOLVE_CONCURRENCY, PORT, FEED_MODE, FORYOU_COUNT,
+  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH,
+} from './config.js';
+
+// Get a resolved video by id, using cache or a fresh yt-dlp resolve.
+async function getResolved(id) {
+  const cached = videoCache.get(id);
+  if (cached && Date.now() - cached.ts < VIDEO_TTL_MS) return cached.item;
+  const item = await resolveVideo(`https://www.tiktok.com/@_/video/${id}`);
+  if (item.playUrl) videoCache.set(id, { ts: Date.now(), item });
+  return item;
+}
+
+// Direct CDN requests get 403 (the URL is bound to yt-dlp's exact session), so
+// we let yt-dlp download the clip to a temp file, then serve that file with
+// Range support. Cached on disk per id; concurrent requests share one download.
+const downloads = new Map(); // id -> Promise<filePath>
+function ensureLocalFile(id) {
+  const out = path.join(os.tmpdir(), `tt-${id}.mp4`);
+  if (fs.existsSync(out) && fs.statSync(out).size > 0) return Promise.resolve(out);
+  if (downloads.has(id)) return downloads.get(id);
+
+  const p = new Promise((resolve, reject) => {
+    const args = [
+      ...YTDLP_ARGS_PREFIX,
+      '-o', out, '--no-part', '--no-warnings', '--quiet',
+      // Prefer h264 (+aac) up to MAX_VIDEO_WIDTH (vertical, so filter by width).
+      // Merge if that rendition is video-only; fall back to any h264, then anything.
+      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/bv*[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]+ba/b[vcodec^=h264]/bv*[vcodec^=h264]+ba/b`,
+      '--merge-output-format', 'mp4',
+      ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : []),
+      `https://www.tiktok.com/@_/video/${id}`,
+    ];
+    const child = spawn(YTDLP_CMD, args, { windowsHide: true });
+    let err = '';
+    child.stderr.on('data', (d) => (err += d));
+    child.on('error', reject);
+    child.on('close', (code) => {
+      downloads.delete(id);
+      if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) resolve(out);
+      else reject(new Error(`download failed (${code}): ${err.slice(-200)}`));
+    });
+  });
+  downloads.set(id, p);
+  return p;
+}
+
+// Download the next few feed clips ahead of time so scrolling stays smooth.
+function prefetchAround(id) {
+  const data = feedCache.data || [];
+  const i = data.findIndex((it) => it.id === id);
+  if (i < 0) return;
+  data.slice(i + 1, i + 5).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+}
+
+// ---- tiny in-memory caches ----
+let feedCache = { ts: 0, data: null };
+const videoCache = new Map(); // id -> { ts, item }
+const commentsCache = new Map(); // id -> { ts, data }
+const userCache = new Map(); // username -> { ts, data }
+let moreBuffer = null; // Promise<items[]> for the next batch, prefetched in the background
+
+// Start fetching the next batch ahead of time (only one in flight).
+function primeMore() {
+  if (moreBuffer) return;
+  moreBuffer = getFeedItems().catch(() => null);
+}
+
+// Overlay fields. Prefer the feed entry's values (For-You item_list has stats +
+// avatar) over yt-dlp's, which lacks them.
+const META_KEYS = ['author', 'nickname', 'avatar', 'verified', 'caption',
+  'likes', 'comments', 'shares', 'saves', 'sound', 'soundCover'];
+function mergeMeta(resolved, entry) {
+  const item = { ...resolved };
+  for (const k of META_KEYS) {
+    const v = entry[k];
+    if (v !== undefined && v !== null && v !== '') item[k] = v;
+  }
+  return item;
+}
+
+// Resolve an array of {url} with bounded concurrency.
+async function resolveAll(entries) {
+  const out = [];
+  let i = 0;
+  async function worker() {
+    while (i < entries.length) {
+      const idx = i++;
+      const e = entries[idx];
+      const cached = videoCache.get(e.id);
+      if (cached && Date.now() - cached.ts < VIDEO_TTL_MS) {
+        out[idx] = cached.item;
+        continue;
+      }
+      try {
+        const resolved = await resolveVideo(e.url);
+        if (resolved.playUrl) {
+          const item = mergeMeta(resolved, e);
+          videoCache.set(e.id, { ts: Date.now(), item });
+          out[idx] = item;
+        }
+      } catch (err) {
+        console.warn('resolve failed', e.id, String(err).slice(0, 120));
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(RESOLVE_CONCURRENCY, entries.length) }, worker)
+  );
+  return out.filter(Boolean);
+}
+
+// Interleave videos from each source so the feed feels mixed, not blocky.
+function interleave(lists) {
+  const result = [];
+  const max = Math.max(0, ...lists.map((l) => l.length));
+  for (let r = 0; r < max; r++)
+    for (const l of lists) if (l[r]) result.push(l[r]);
+  return result;
+}
+
+// Produce ready-to-display feed items.
+//  - For-You: the scrape already returns full items (id, author, stats, cover,
+//    sound, avatar). No per-video yt-dlp pass needed — bytes are fetched lazily
+//    by /api/stream. This is the big speedup.
+//  - Sources: listSource only gives ids, so we resolve metadata via yt-dlp.
+async function getFeedItems() {
+  if (FEED_MODE === 'foryou') {
+    return fetchForYou(FORYOU_COUNT);
+  }
+  const lists = await Promise.all(
+    SOURCES.map((s) =>
+      listSource(s, PER_SOURCE).catch((e) => {
+        console.warn('list failed', s, String(e).slice(0, 120));
+        return [];
+      })
+    )
+  );
+  return resolveAll(interleave(lists));
+}
+
+async function buildFeed() {
+  if (feedCache.data && Date.now() - feedCache.ts < FEED_TTL_MS)
+    return feedCache.data;
+
+  const items = await getFeedItems();
+  feedCache = { ts: Date.now(), data: items };
+  // Warm the first several clips so the opening videos play instantly.
+  items.slice(0, 6).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+  primeMore(); // start fetching the next batch now, while the user watches this one
+  return items;
+}
+
+function send(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+  });
+  res.end(body);
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  try {
+    if (url.pathname === '/health') return send(res, 200, { ok: true });
+
+    // Web preview of the TV experience (open in Chrome on Windows).
+    if (url.pathname === '/' || url.pathname === '/preview') {
+      const html = fs.readFileSync(path.join(here, 'public', 'preview.html'));
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      return res.end(html);
+    }
+
+    if (url.pathname === '/api/feed') {
+      const items = await buildFeed();
+      return send(res, 200, { count: items.length, items });
+    }
+
+    // Fresh batch for infinite scroll — served from the prefetched buffer so
+    // there's no wait at the boundary; immediately starts prefetching the next.
+    if (url.pathname === '/api/more') {
+      primeMore();
+      const items = (await moreBuffer) || [];
+      moreBuffer = null;
+      primeMore(); // begin the batch after this one
+      items.slice(0, 3).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+      return send(res, 200, { items });
+    }
+
+    // On-demand fresh resolve (for when a cached playUrl has expired).
+    if (url.pathname.startsWith('/api/resolve/')) {
+      const id = url.pathname.split('/').pop();
+      const item = await getResolved(id);
+      if (!item.playUrl) return send(res, 404, { error: 'no playable url' });
+      return send(res, 200, item);
+    }
+
+    // A channel's profile + video grid (tap an author/avatar).
+    if (url.pathname.startsWith('/api/profile/')) {
+      const username = decodeURIComponent(url.pathname.split('/').pop()).replace(/^@/, '');
+      const cached = userCache.get('p:' + username);
+      if (cached && Date.now() - cached.ts < FEED_TTL_MS) {
+        return send(res, 200, cached.data);
+      }
+      const data = await fetchProfile(username, 30);
+      userCache.set('p:' + username, { ts: Date.now(), data });
+      return send(res, 200, data);
+    }
+
+    // A page of a channel's videos for the profile grid's "Load more".
+    if (url.pathname.startsWith('/api/user-videos/')) {
+      const username = decodeURIComponent(url.pathname.split('/').pop()).replace(/^@/, '');
+      const start = Number(url.searchParams.get('start') || 0);
+      const count = Number(url.searchParams.get('count') || 30);
+      const videos = await listUserGrid(username, start, count);
+      return send(res, 200, { videos });
+    }
+
+    // A channel's recent videos (tap an author/avatar to browse them).
+    if (url.pathname.startsWith('/api/user/')) {
+      const username = decodeURIComponent(url.pathname.split('/').pop()).replace(/^@/, '');
+      const cached = userCache.get(username);
+      if (cached && Date.now() - cached.ts < FEED_TTL_MS) {
+        return send(res, 200, { items: cached.data });
+      }
+      const entries = await listSource(`https://www.tiktok.com/@${username}`, 12);
+      const items = await resolveAll(entries);
+      userCache.set(username, { ts: Date.now(), data: items });
+      return send(res, 200, { items });
+    }
+
+    // Read-only comments for a video.
+    if (url.pathname.startsWith('/api/comments/')) {
+      const id = url.pathname.split('/').pop();
+      const cached = commentsCache.get(id);
+      if (cached && Date.now() - cached.ts < FEED_TTL_MS) {
+        return send(res, 200, { comments: cached.data });
+      }
+      const item = await getResolved(id);
+      const vurl = `https://www.tiktok.com/@${item.author || '_'}/video/${id}`;
+      const comments = await fetchComments(vurl, 20);
+      commentsCache.set(id, { ts: Date.now(), data: comments });
+      return send(res, 200, { comments });
+    }
+
+    // Stream proxy: the Apple TV plays this. yt-dlp downloads the clip, then we
+    // serve it with HTTP Range support so AVPlayer can stream/seek smoothly.
+    if (url.pathname.startsWith('/api/stream/')) {
+      const id = url.pathname.split('/').pop().replace(/[^\w-]/g, '');
+      prefetchAround(id); // warm the next few clips in the background
+      const file = await ensureLocalFile(id);
+      const size = fs.statSync(file).size;
+      const range = req.headers.range;
+
+      if (range) {
+        const m = /bytes=(\d+)-(\d*)/.exec(range);
+        const start = m ? parseInt(m[1], 10) : 0;
+        const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
+        res.writeHead(206, {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end}/${size}`,
+          'Content-Length': end - start + 1,
+        });
+        fs.createReadStream(file, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': size,
+        });
+        fs.createReadStream(file).pipe(res);
+      }
+      return;
+    }
+
+    send(res, 404, { error: 'not found' });
+  } catch (e) {
+    send(res, 500, { error: String(e).slice(0, 200) });
+  }
+});
+
+// Delete cached clips older than an hour so the temp dir doesn't grow forever.
+function cleanupTemp() {
+  const dir = os.tmpdir();
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.startsWith('tt-') || !f.endsWith('.mp4')) continue;
+    const fp = path.join(dir, f);
+    try {
+      if (Date.now() - fs.statSync(fp).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(fp);
+    } catch {}
+  }
+}
+cleanupTemp();
+setInterval(cleanupTemp, 30 * 60 * 1000).unref();
+
+server.listen(PORT, () =>
+  console.log(
+    `tiktok-appletv backend on http://0.0.0.0:${PORT}  (/api/feed)  mode=${FEED_MODE}`
+  )
+);

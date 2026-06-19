@@ -1,0 +1,28 @@
+name: TikTokTV
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    tvOS: "17.0"
+targets:
+  TikTokTV:
+    type: application
+    platform: tvOS
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.tiktoktv
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Resources/Info.plist
+        TARGETED_DEVICE_FAMILY: "3"
+schemes:
+  TikTokTV:
+    build:
+      targets:
+        TikTokTV: all
+    run:
+      config: Debug
+    archive:
+      config: Release

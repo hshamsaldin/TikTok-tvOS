@@ -1,0 +1,20 @@
+[Unit]
+Description=TikTok Apple TV backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- edit these for your Pi ---
+User=pi
+WorkingDirectory=/home/pi/tiktok-appletv/backend
+Environment=FEED_MODE=foryou
+Environment=PYTHON=python3
+# Optional quality knob (576 = 540p, 720 = 720p, 1080 = 1080p):
+# Environment=MAX_VIDEO_WIDTH=720
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

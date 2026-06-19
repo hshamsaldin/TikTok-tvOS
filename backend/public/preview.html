@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TikTok TV — Preview</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: #000; overflow: hidden;
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif; color: #fff; }
+
+  .logo { display: inline-flex; align-items: center; gap: 8px; font-weight: 800;
+    letter-spacing: -.5px; text-shadow: 1.5px 0 #fe2c55, -1.5px 0 #25f4ee; }
+  .logo svg { fill: #fff; filter: drop-shadow(1.5px 0 #fe2c55) drop-shadow(-1.5px 0 #25f4ee); }
+
+  #feed { height: 100vh; overflow-y: scroll; scroll-snap-type: y mandatory; scrollbar-width: none; }
+  #feed::-webkit-scrollbar { display: none; }
+  .slide { position: relative; height: 100vh; scroll-snap-align: start;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .bg { position: absolute; inset: 0; background-size: cover; background-position: center;
+    filter: blur(48px) brightness(.4); transform: scale(1.3); }
+
+  .stage { position: relative; height: calc(100% - 28px); aspect-ratio: 9 / 16; max-width: 100%; margin: 0 auto; }
+  .frame { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; background: #000; }
+  video { width: 100%; height: 100%; object-fit: contain; background: transparent; }
+  body.fill video { object-fit: cover; }
+
+  /* mute control — top-left of the video, appears on mouse movement */
+  .mute { position: absolute; top: 14px; left: 14px; width: 44px; height: 44px; cursor: pointer;
+    background: rgba(0,0,0,.45); border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; opacity: 0; transition: opacity .3s; }
+  .mute svg { width: 24px; height: 24px; }
+  body.show-controls .mute { opacity: 1; }
+
+  /* action rail — just OUTSIDE the video on the right */
+  .rail { position: absolute; left: 100%; bottom: 28px; margin-left: 22px;
+    display: flex; flex-direction: column; align-items: center; gap: 20px; }
+  .avatarWrap { position: relative; margin-bottom: 6px; }
+  .avatarWrap .avatar { width: 56px; height: 56px; border-radius: 50%;
+    object-fit: cover; background: #333; display: block; }
+  .follow { position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%);
+    width: 22px; height: 22px; border-radius: 50%; background: #fe2c55; color: #fff;
+    font-size: 17px; font-weight: 700; line-height: 21px; text-align: center; }
+  .action { display: flex; flex-direction: column; align-items: center; gap: 7px; cursor: pointer; }
+  .action.static { cursor: default; }
+  .action .icon { width: 54px; height: 54px; border-radius: 50%; background: rgba(40,40,40,.85);
+    display: flex; align-items: center; justify-content: center; transition: transform .1s; }
+  .action .icon svg { width: 30px; height: 30px; fill: #fff; }
+  .action:not(.static):active .icon { transform: scale(.9); }
+  .action span { font-size: 14px; font-weight: 700; text-shadow: 0 1px 4px rgba(0,0,0,.7); }
+
+  /* author + caption — ON the video, bottom-left, like TikTok */
+  .meta { position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 22px 26px;
+    background: linear-gradient(transparent, rgba(0,0,0,.55));
+    text-shadow: 0 1px 6px rgba(0,0,0,.9); }
+  .author { font-weight: 700; font-size: 20px; margin-bottom: 8px; display: flex; align-items: center; }
+  .vbadge { width: 18px; height: 18px; margin-left: 6px; }
+  .caption { font-size: 15px; opacity: .92;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .caption.expanded { -webkit-line-clamp: unset; overflow: visible; }
+  .morelink { display: none; font-size: 14px; font-weight: 700; opacity: .85; cursor: pointer; margin-top: 2px; }
+  .sound { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-top: 10px; max-width: 82%; }
+  .sound svg { width: 16px; height: 16px; fill: #fff; flex: 0 0 auto; }
+  .sound .txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .disc { width: 48px; height: 48px; border-radius: 50%; object-fit: cover;
+    border: 7px solid #1a1a1a; background: #000; }
+  .avatarWrap { cursor: pointer; }
+  .author { cursor: pointer; }
+
+  /* center play indicator when paused */
+  .playpause { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 84px; height: 84px; opacity: 0; transition: opacity .15s; pointer-events: none; }
+  .playpause svg { width: 100%; height: 100%; fill: rgba(255,255,255,.85);
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,.6)); }
+  .frame.paused .playpause { opacity: 1; }
+
+  /* playback progress bar at the bottom of the video */
+  .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,.25); }
+  .progress .bar { height: 100%; width: 0; background: #fff; }
+
+  #back { position: fixed; top: 16px; left: 18px; z-index: 45; cursor: pointer;
+    background: rgba(0,0,0,.5); padding: 9px 16px; border-radius: 20px; font-weight: 600;
+    font-size: 15px; display: none; backdrop-filter: blur(8px); }
+  #back.show { display: block; }
+
+  /* channel profile view */
+  #profile { position: fixed; inset: 0; background: #000; z-index: 35; overflow-y: auto;
+    display: none; padding: 64px 40px 40px; }
+  #profile.open { display: block; }
+  .phead { display: flex; gap: 26px; align-items: center; max-width: 1100px; margin: 0 auto 30px; }
+  .pavatar { width: 120px; height: 120px; border-radius: 50%; object-fit: cover; background: #333; flex: 0 0 auto; }
+  .pname { font-size: 30px; font-weight: 800; display: flex; align-items: center; }
+  .pname .vbadge { width: 22px; height: 22px; }
+  .puser { opacity: .7; margin: 4px 0 14px; font-size: 16px; }
+  .pstats { display: flex; gap: 26px; font-size: 15px; }
+  .pstats b { font-size: 18px; }
+  .pbio { margin-top: 14px; font-size: 14px; opacity: .9; max-width: 620px; white-space: pre-wrap; }
+  .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 10px; max-width: 1100px; margin: 0 auto; }
+  .pcell { position: relative; aspect-ratio: 9 / 16; background: #111; border-radius: 6px;
+    overflow: hidden; cursor: pointer; }
+  .pcell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .pcell .pv { position: absolute; left: 8px; bottom: 7px; font-size: 13px; font-weight: 700;
+    text-shadow: 0 1px 3px #000; }
+  #pmorewrap { max-width: 1100px; margin: 22px auto 10px; text-align: center; }
+  #pmore { background: #2a2a2a; color: #fff; border: none; padding: 12px 30px; border-radius: 8px;
+    font-size: 15px; font-weight: 600; cursor: pointer; }
+  #pmore:disabled { opacity: .6; cursor: default; }
+
+  /* comments bottom-sheet */
+  #comments { position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 40;
+    display: none; justify-content: flex-end; }
+  #comments.open { display: flex; }
+  .sheet { width: 440px; max-width: 92vw; height: 100%; background: #1c1c1c;
+    display: flex; flex-direction: column; box-shadow: -8px 0 30px rgba(0,0,0,.5); }
+  .chead { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px;
+    border-bottom: 1px solid #262626; font-weight: 700; }
+  #cclose { background: none; border: none; color: #fff; font-size: 22px; cursor: pointer; }
+  #clist { overflow-y: auto; padding: 12px 22px 28px; }
+  .citem { display: flex; gap: 12px; padding: 12px 0; }
+  .cavatar { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; background: #333; flex: 0 0 auto; }
+  .cauthor { font-weight: 600; font-size: 14px; opacity: .7; margin-bottom: 3px; }
+  .ctext { font-size: 15px; line-height: 1.35; }
+  .cmeta { font-size: 12px; opacity: .55; margin-top: 5px; }
+  .cempty { opacity: .6; text-align: center; padding: 40px; }
+
+  #status { position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 28px; background: #000; z-index: 30; }
+  #status .logo { font-size: 44px; }
+  #status .logo svg { width: 46px; height: 46px; }
+  .spinner { width: 40px; height: 40px; border: 4px solid rgba(255,255,255,.2);
+    border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #msg { font-size: 14px; opacity: .6; }
+
+  #toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.6); padding: 10px 18px; border-radius: 22px; font-size: 13px;
+    z-index: 26; backdrop-filter: blur(8px); transition: opacity .5s; max-width: 80vw; text-align: center; }
+  #toast.hide { opacity: 0; }
+</style>
+</head>
+<body>
+<div id="status">
+  <div class="logo">
+    <svg viewBox="0 0 24 24"><path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>
+    TikTok
+  </div>
+  <div class="spinner"></div>
+  <div id="msg">Preparing your feed…</div>
+</div>
+
+<div id="back">‹ Back</div>
+<div id="toast" class="hide"></div>
+<div id="feed"></div>
+
+<div id="profile">
+  <div class="phead">
+    <img id="pavatar" class="pavatar" referrerpolicy="no-referrer">
+    <div class="pinfo">
+      <div id="pname" class="pname"></div>
+      <div id="puser" class="puser"></div>
+      <div class="pstats">
+        <span><b id="pfollowing">0</b> Following</span>
+        <span><b id="pfollowers">0</b> Followers</span>
+        <span><b id="plikes">0</b> Likes</span>
+      </div>
+      <div id="pbio" class="pbio"></div>
+    </div>
+  </div>
+  <div id="pgrid" class="pgrid"></div>
+  <div id="pmorewrap"><button id="pmore">Load more</button></div>
+</div>
+
+<div id="comments">
+  <div class="sheet">
+    <div class="chead"><span id="ctitle">Comments</span><button id="cclose">✕</button></div>
+    <div id="clist"></div>
+  </div>
+</div>
+
+<script>
+  let muted = false; // default unmuted; falls back to muted only if the browser blocks autoplay
+  const feed = document.getElementById('feed');
+  const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
+
+  const fmt = (n) => {
+    n = +n || 0;
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+    return '' + n;
+  };
+  const ICON = {
+    like: '<svg viewBox="0 0 24 24"><path d="M12 21s-8-5.3-10-10.3C.8 7 2.9 4 6.2 4 8.2 4 9.7 5.2 12 7.6 14.3 5.2 15.8 4 17.8 4 21.1 4 23.2 7 22 10.7 20 15.7 12 21 12 21z"/></svg>',
+    comment: '<svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.6 2 11c0 2.4 1.3 4.5 3.4 6L4 21l4.7-2.1c1 .3 2.2.4 3.3.4 5.5 0 10-3.6 10-8s-4.5-8-10-8z"/></svg>',
+    save: '<svg viewBox="0 0 24 24"><path d="M6 2h12a1 1 0 0 1 1 1v18l-7-4-7 4V3a1 1 0 0 1 1-1z"/></svg>',
+    // TikTok-style curved "share" arrow
+    share: '<svg viewBox="0 0 24 24"><path d="M14 3l8 7.5-8 7.5v-4.3C7.8 13.7 3.9 15.6 2 20c.4-7.2 4.6-11.6 12-12.1V3z"/></svg>',
+  };
+  // speaker icons for the mute control
+  const MUTE_OFF = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9l5 6m0-6l-5 6" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+  const MUTE_ON = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+  const VBADGE = '<svg class="vbadge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#20d5ec"/><path d="M9.8 16.2 5.6 12l1.5-1.5 2.7 2.7 6-6L17.3 8.7z" fill="#fff"/></svg>';
+  const NOTE = '<svg viewBox="0 0 24 24"><path d="M9 17V5l10-2v12" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><circle cx="6.5" cy="17.5" r="2.6"/><circle cx="16.5" cy="15.5" r="2.6"/></svg>';
+  const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+  // last arg = static (display-only, not clickable)
+  const action = (svg, n, act, isStatic) =>
+    `<div class="action${isStatic ? ' static' : ''}" data-act="${act}"><div class="icon">${svg}</div><span>${fmt(n)}</span></div>`;
+
+  let toastTimer;
+  function toast(text, ms = 3000) {
+    const t = document.getElementById('toast');
+    t.textContent = text; t.classList.remove('hide');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.add('hide'), ms);
+  }
+
+  function setMuted(m) {
+    muted = m;
+    document.querySelectorAll('video').forEach((v) => (v.muted = muted));
+    document.querySelectorAll('.mute').forEach((b) => (b.innerHTML = muted ? MUTE_OFF : MUTE_ON));
+  }
+
+  // controls (mute) fade in on mouse movement
+  let ctlTimer;
+  window.addEventListener('mousemove', () => {
+    document.body.classList.add('show-controls');
+    clearTimeout(ctlTimer);
+    ctlTimer = setTimeout(() => document.body.classList.remove('show-controls'), 2500);
+  });
+
+  let mainItems = [];
+  let currentVideo = null, currentFrame = null;
+  let channelMode = false, loadingMore = false;
+  let autoScroll = true;
+  let inChannelVideo = false, interacted = false;
+  let feedIsMain = true, mainScroll = 0;
+  const seen = new Set();
+
+  function firstInteract() { if (!interacted) { interacted = true; setMuted(false); } }
+
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      const v = e.target.querySelector('video');
+      if (!v) continue;
+      if (e.isIntersecting && e.intersectionRatio > 0.6) {
+        if (!v.src) v.src = '/api/stream/' + v.dataset.id;
+        v.muted = muted;
+        try { v.currentTime = 0; } catch (_) {}   // restart from the beginning
+        const fr = e.target.querySelector('.frame');
+        currentVideo = v;
+        currentFrame = fr;
+        // Try unmuted; if the browser blocks autoplay-with-sound, play muted so
+        // it still runs (never paused). It unmutes on the first interaction.
+        v.play().then(() => fr && fr.classList.remove('paused')).catch(() => {
+          v.muted = true;
+          v.play().then(() => fr && fr.classList.remove('paused'))
+                  .catch(() => fr && fr.classList.add('paused'));
+        });
+        prewarm(e.target);
+        maybeLoadMore(e.target);
+      } else {
+        v.pause();
+      }
+    }
+  }, { threshold: [0, 0.6, 1] });
+
+  async function init() {
+    let data;
+    try {
+      data = await (await fetch('/api/feed')).json();
+    } catch (e) {
+      document.getElementById('msg').textContent = 'Could not reach the server.';
+      return;
+    }
+    if (!data.items || !data.items.length) {
+      document.getElementById('msg').textContent = 'Your feed is empty — check the server log.';
+      return;
+    }
+    mainItems = data.items;
+    renderFeed(mainItems, false);
+    document.getElementById('status').remove();
+  }
+
+  function renderFeed(items, channel, startIndex) {
+    channelMode = !!channel;
+    feedIsMain = !channel;
+    feed.innerHTML = '';
+    seen.clear();
+    currentVideo = null; currentFrame = null;
+    for (const it of items) appendItem(it);
+    feed.scrollTop = (startIndex && feed.children[startIndex])
+      ? startIndex * window.innerHeight : 0;
+  }
+
+  function appendItem(it) {
+    if (!it || seen.has(it.id)) return;
+    seen.add(it.id);
+    const s = buildSlide(it);
+    feed.append(s);
+    io.observe(s);
+    // Reveal the "more" link only if the caption is actually truncated.
+    const cap = s.querySelector('.caption');
+    const ml = s.querySelector('.morelink');
+    if (cap && ml) requestAnimationFrame(() => {
+      if (cap.scrollHeight > cap.clientHeight + 2) ml.style.display = 'block';
+    });
+  }
+
+  function buildSlide(it) {
+    const slide = el('div', 'slide');
+    const bg = el('div', 'bg');
+    if (it.cover) bg.style.backgroundImage = `url("${it.cover}")`;
+
+    const stage = el('div', 'stage');
+    const frame = el('div', 'frame');
+
+    const v = document.createElement('video');
+    v.loop = !autoScroll; v.muted = muted; v.playsInline = true; v.preload = 'none';
+    v.dataset.id = it.id;
+    if (it.cover) v.poster = it.cover;
+    v.addEventListener('ended', () => {
+      if (v !== currentVideo) return;
+      // Don't autoscroll while the comments panel is open — keep looping instead.
+      if (document.getElementById('comments').classList.contains('open')) {
+        v.currentTime = 0; v.play().catch(() => {});
+        return;
+      }
+      if (autoScroll) feed.scrollBy({ top: window.innerHeight, behavior: 'smooth' });
+    });
+
+    const mute = el('div', 'mute');
+    mute.innerHTML = muted ? MUTE_OFF : MUTE_ON;
+    mute.addEventListener('click', (ev) => { ev.stopPropagation(); setMuted(!muted); });
+
+    const pp = el('div', 'playpause');
+    pp.innerHTML = PLAY;
+
+    const progress = el('div', 'progress');
+    const bar = el('div', 'bar');
+    progress.append(bar);
+    v.addEventListener('timeupdate', () => {
+      bar.style.width = (v.duration ? (v.currentTime / v.duration) * 100 : 0) + '%';
+    });
+
+    const meta = el('div', 'meta');
+    const author = el('div', 'author');
+    author.textContent = it.nickname || ('@' + (it.author || ''));
+    if (it.verified) author.insertAdjacentHTML('beforeend', VBADGE);
+    author.addEventListener('click', (ev) => { ev.stopPropagation(); openChannel(it.author); });
+    const caption = el('div', 'caption');
+    caption.textContent = it.caption || '';
+    const moreLink = el('div', 'morelink');
+    moreLink.textContent = 'more';
+    moreLink.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const exp = caption.classList.toggle('expanded');
+      moreLink.textContent = exp ? 'less' : 'more';
+    });
+    meta.append(author, caption, moreLink);
+    if (it.sound) {
+      const sound = el('div', 'sound');
+      sound.innerHTML = NOTE;
+      const txt = el('span', 'txt');
+      txt.textContent = it.sound;
+      sound.append(txt);
+      meta.append(sound);
+    }
+
+    frame.append(v, mute, pp, meta, progress);
+
+    const rail = el('div', 'rail');
+    rail.innerHTML =
+      (it.avatar
+        ? `<div class="avatarWrap"><img class="avatar" src="${it.avatar}" referrerpolicy="no-referrer"><span class="follow">+</span></div>`
+        : '') +
+      action(ICON.like, it.likes, 'like', true) +
+      action(ICON.comment, it.comments, 'comment', false) +
+      action(ICON.save, it.saves, 'save', true) +
+      action(ICON.share, it.shares, 'share', false) +
+      (it.soundCover ? `<img class="disc" src="${it.soundCover}" referrerpolicy="no-referrer">` : '');
+    rail.querySelectorAll('.action:not(.static)').forEach((a) => {
+      a.addEventListener('click', (ev) => { ev.stopPropagation(); handleAction(a.dataset.act, it); });
+    });
+    const avw = rail.querySelector('.avatarWrap');
+    if (avw) avw.addEventListener('click', (ev) => { ev.stopPropagation(); openChannel(it.author); });
+
+    stage.append(frame, rail);
+    slide.append(bg, stage);
+    return slide;
+  }
+
+  // Infinite scroll: pull a fresh batch as you near the end (main feed only).
+  function maybeLoadMore(slide) {
+    if (channelMode || loadingMore) return;
+    const kids = feed.children;
+    const idx = Array.prototype.indexOf.call(kids, slide);
+    if (idx >= 0 && idx >= kids.length - 8) loadMore();
+  }
+  let lastEmptyMore = 0;
+  async function loadMore() {
+    if (Date.now() - lastEmptyMore < 20000) return; // backed off after an empty batch
+    loadingMore = true;
+    try {
+      const before = seen.size;
+      const { items } = await (await fetch('/api/more')).json();
+      (items || []).forEach(appendItem);
+      if (seen.size === before) lastEmptyMore = Date.now(); // nothing new — cool down
+    } catch (e) { /* ignore */ }
+    loadingMore = false;
+  }
+
+  const pview = document.getElementById('profile');
+  let channelVideos = [];
+  let profileUsername = '';
+
+  async function openChannel(username) {
+    if (!username) return;
+    if (feedIsMain) mainScroll = feed.scrollTop; // remember For-You position
+    toast('Loading @' + username + '…', 10000);
+    try {
+      const data = await (await fetch('/api/profile/' + encodeURIComponent(username))).json();
+      document.getElementById('toast').classList.add('hide');
+      renderProfile(data, username);
+    } catch (e) {
+      toast('Couldn’t load @' + username);
+    }
+  }
+
+  function renderProfile(data, username) {
+    const u = data.user || {};
+    channelVideos = data.videos || [];
+    document.getElementById('pavatar').src = u.avatar || '';
+    const pname = document.getElementById('pname');
+    pname.textContent = u.nickname || ('@' + username);
+    if (u.verified) pname.insertAdjacentHTML('beforeend', VBADGE);
+    document.getElementById('puser').textContent = '@' + (u.username || username);
+    document.getElementById('pfollowing').textContent = fmt(u.following);
+    document.getElementById('pfollowers').textContent = fmt(u.followers);
+    document.getElementById('plikes').textContent = fmt(u.likes);
+    document.getElementById('pbio').textContent = u.signature || '';
+    profileUsername = u.username || username;
+    const grid = document.getElementById('pgrid');
+    grid.innerHTML = '';
+    channelVideos.forEach((v, i) => addProfileCell(v, i));
+    const moreBtn = document.getElementById('pmore');
+    moreBtn.style.display = channelVideos.length ? '' : 'none';
+    moreBtn.disabled = false;
+    moreBtn.textContent = 'Load more';
+    if (!channelVideos.length) {
+      grid.innerHTML = '<div style="opacity:.6;padding:20px">No videos found.</div>';
+    }
+    inChannelVideo = false;
+    if (currentVideo) currentVideo.pause();
+    pview.classList.add('open');
+    document.getElementById('back').classList.add('show');
+  }
+
+  function openChannelVideo(index) {
+    inChannelVideo = true;
+    pview.classList.remove('open');
+    renderFeed(channelVideos, true, index);
+  }
+
+  function addProfileCell(v, index) {
+    const cell = el('div', 'pcell');
+    cell.innerHTML =
+      `<img src="${v.cover}" referrerpolicy="no-referrer"><div class="pv">▶ ${fmt(v.plays)}</div>`;
+    cell.addEventListener('click', () => openChannelVideo(index));
+    document.getElementById('pgrid').append(cell);
+  }
+
+  async function loadMoreProfile() {
+    const btn = document.getElementById('pmore');
+    if (!profileUsername || btn.disabled) return;
+    btn.disabled = true; btn.textContent = 'Loading…';
+    try {
+      const start = channelVideos.length;
+      const { videos } = await (await fetch(
+        '/api/user-videos/' + encodeURIComponent(profileUsername) + '?start=' + start + '&count=30'
+      )).json();
+      (videos || []).forEach((v) => { const i = channelVideos.length; channelVideos.push(v); addProfileCell(v, i); });
+      if (!videos || videos.length < 30) btn.style.display = 'none';
+      else { btn.disabled = false; btn.textContent = 'Load more'; }
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Load more';
+    }
+  }
+  document.getElementById('pmore').addEventListener('click', loadMoreProfile);
+
+  document.getElementById('back').addEventListener('click', () => {
+    // Watching a channel video → return to that channel's profile grid.
+    if (inChannelVideo) {
+      inChannelVideo = false;
+      if (currentVideo) currentVideo.pause();
+      pview.classList.add('open');
+      return;
+    }
+    // Profile overlay is open over a feed → close it.
+    pview.classList.remove('open');
+    if (feedIsMain) {
+      // For-You is still underneath, right where we left it — just resume.
+      if (currentVideo) currentVideo.play();
+      document.getElementById('back').classList.remove('show');
+    } else {
+      // Underneath is a channel feed → rebuild For-You and restore its position.
+      renderFeed(mainItems, false);
+      feed.scrollTop = mainScroll;
+      document.getElementById('back').classList.remove('show');
+    }
+  });
+
+  function handleAction(act, it) {
+    if (act === 'comment') openComments(it);
+    else if (act === 'share') toast('https://www.tiktok.com/@' + it.author + '/video/' + it.id, 6000);
+  }
+
+  // ---- comments panel (read-only) ----
+  const cpanel = document.getElementById('comments');
+  const clist = document.getElementById('clist');
+  document.getElementById('cclose').addEventListener('click', closeComments);
+  cpanel.addEventListener('click', (e) => { if (e.target === cpanel) closeComments(); });
+  function closeComments() { cpanel.classList.remove('open'); }
+
+  async function openComments(it) {
+    cpanel.classList.add('open');
+    document.getElementById('ctitle').textContent = 'Comments · ' + fmt(it.comments);
+    clist.innerHTML = '<div class="cempty">Loading comments…</div>';
+    try {
+      const r = await fetch('/api/comments/' + it.id);
+      const { comments } = await r.json();
+      if (!comments || !comments.length) {
+        clist.innerHTML = '<div class="cempty">No comments found.</div>';
+        return;
+      }
+      clist.innerHTML = '';
+      for (const c of comments) {
+        const row = el('div', 'citem');
+        row.innerHTML =
+          `<img class="cavatar" src="${c.avatar || ''}" referrerpolicy="no-referrer">` +
+          `<div><div class="cauthor">@${c.author || ''}</div>` +
+          `<div class="ctext"></div><div class="cmeta">♥ ${fmt(c.likes)}</div></div>`;
+        row.querySelector('.ctext').textContent = c.text || '';
+        clist.append(row);
+      }
+    } catch (e) {
+      clist.innerHTML = '<div class="cempty">Couldn’t load comments.</div>';
+    }
+  }
+
+  // Start downloading the next couple of clips so scrolling feels instant.
+  function prewarm(slide) {
+    let n = slide.nextElementSibling, count = 0;
+    while (n && count < 5) {
+      const nv = n.querySelector('video');
+      if (nv && !nv.src) { nv.preload = 'auto'; nv.src = '/api/stream/' + nv.dataset.id; nv.load(); }
+      n = n.nextElementSibling; count++;
+    }
+  }
+
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') return closeComments();
+    firstInteract();
+    const h = window.innerHeight;
+    if (ev.key === 'ArrowDown') feed.scrollBy({ top: h, behavior: 'smooth' });
+    if (ev.key === 'ArrowUp') feed.scrollBy({ top: -h, behavior: 'smooth' });
+    if (ev.key.toLowerCase() === 'f') document.body.classList.toggle('fill');
+    if (ev.key.toLowerCase() === 'm') setMuted(!muted);
+    if (ev.key.toLowerCase() === 'a') {
+      autoScroll = !autoScroll;
+      document.querySelectorAll('video').forEach((x) => (x.loop = !autoScroll));
+      toast('Autoscroll ' + (autoScroll ? 'on' : 'off'));
+    }
+  });
+  feed.addEventListener('click', () => {
+    if (!currentVideo) return;
+    if (currentVideo.paused) {
+      currentVideo.play();
+      if (currentFrame) currentFrame.classList.remove('paused');
+    } else {
+      currentVideo.pause();
+      if (currentFrame) currentFrame.classList.add('paused');
+    }
+  });
+  // First real gesture lifts the browser's autoplay-sound block → unmute.
+  ['pointerdown', 'keydown', 'wheel'].forEach((evt) =>
+    window.addEventListener(evt, firstInteract, { passive: true }));
+
+  init();
+</script>
+</body>
+</html>
