@@ -1,23 +1,38 @@
 import UIKit
 
-/// Channel profile: header (avatar, name, stats, bio) + a grid of videos.
-/// Select a thumbnail to play that channel's videos. Menu closes it.
+/// Channel profile, styled for the TV's landscape screen (like TikTok's desktop
+/// profile): a cinematic blurred backdrop, an avatar + name + stats header on the
+/// left, and a grid of rounded poster cards below. Select a poster to play that
+/// channel's videos. The Menu/Back button closes it.
 final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
+
     private let username: String
     private var videos: [FeedItem] = []
     private var user: ProfileUser?
     private var loadingMore = false
 
+    // Cinematic backdrop (blurred avatar) so the screen is never flat grey/black.
+    private let backdrop = AsyncImageView()
+    private let backdropBlur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    private let dim = UIView()
+
+    // Header
     private let avatar = AsyncImageView()
     private let nameLabel = UILabel()
-    private let statsLabel = UILabel()
+    private let handleLabel = UILabel()
     private let bioLabel = UILabel()
+    private let followingStat = StatView()
+    private let followersStat = StatView()
+    private let likesStat = StatView()
+    private let videosTitle = UILabel()
+
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
-    private let gridColumns: CGFloat = 6
-    private let gridSpacing: CGFloat = 16
-    private let gridInset: CGFloat = 40
+
+    private let gridColumns: CGFloat = 5
+    private let gridSpacing: CGFloat = 22
+    private let sideInset: CGFloat = 80
     private var lastGridWidth: CGFloat = 0
 
     init(username: String) {
@@ -31,30 +46,95 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         super.viewDidLoad()
         view.backgroundColor = .black
 
+        setupBackdrop()
+        let header = setupHeader()
+        setupGrid(below: header)
+        setupBackHint()
+
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+
+        load()
+    }
+
+    // MARK: setup
+
+    private func setupBackdrop() {
+        backdrop.contentMode = .scaleAspectFill
+        backdrop.clipsToBounds = true
+        backdrop.backgroundColor = UIColor(white: 0.08, alpha: 1)
+        backdrop.frame = view.bounds
+        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(backdrop)
+
+        backdropBlur.frame = view.bounds
+        backdropBlur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(backdropBlur)
+
+        dim.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        dim.frame = view.bounds
+        dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(dim)
+    }
+
+    private func setupHeader() -> UIView {
         avatar.translatesAutoresizingMaskIntoConstraints = false
-        avatar.layer.cornerRadius = 60
+        avatar.layer.cornerRadius = 80
         avatar.clipsToBounds = true
-        avatar.backgroundColor = UIColor(white: 0.2, alpha: 1)
+        avatar.backgroundColor = UIColor(white: 0.18, alpha: 1)
         avatar.contentMode = .scaleAspectFill
+        avatar.layer.borderWidth = 3
+        avatar.layer.borderColor = UIColor(white: 1, alpha: 0.85).cgColor
 
-        nameLabel.font = .systemFont(ofSize: 34, weight: .bold)
+        nameLabel.font = .systemFont(ofSize: 42, weight: .bold)
         nameLabel.textColor = .white
-        statsLabel.font = .systemFont(ofSize: 20)
-        statsLabel.textColor = UIColor(white: 1, alpha: 0.85)
-        bioLabel.font = .systemFont(ofSize: 18)
-        bioLabel.textColor = UIColor(white: 1, alpha: 0.8)
-        bioLabel.numberOfLines = 3
+        handleLabel.font = .systemFont(ofSize: 26, weight: .medium)
+        handleLabel.textColor = UIColor(white: 1, alpha: 0.65)
+        bioLabel.font = .systemFont(ofSize: 21)
+        bioLabel.textColor = UIColor(white: 1, alpha: 0.85)
+        bioLabel.numberOfLines = 2
 
-        let info = UIStackView(arrangedSubviews: [nameLabel, statsLabel, bioLabel])
+        let stats = UIStackView(arrangedSubviews: [followersStat, followingStat, likesStat])
+        stats.axis = .horizontal
+        stats.spacing = 54
+        stats.alignment = .leading
+
+        let info = UIStackView(arrangedSubviews: [nameLabel, handleLabel, stats, bioLabel])
         info.axis = .vertical
-        info.spacing = 8
+        info.spacing = 12
         info.alignment = .leading
+        info.setCustomSpacing(20, after: handleLabel)
+        info.setCustomSpacing(20, after: stats)
+
         let header = UIStackView(arrangedSubviews: [avatar, info])
         header.axis = .horizontal
-        header.spacing = 28
+        header.spacing = 40
         header.alignment = .center
         header.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(header)
+
+        NSLayoutConstraint.activate([
+            avatar.widthAnchor.constraint(equalToConstant: 160),
+            avatar.heightAnchor.constraint(equalToConstant: 160),
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -sideInset),
+        ])
+        return header
+    }
+
+    private func setupGrid(below header: UIView) {
+        videosTitle.text = "Videos"
+        videosTitle.font = .systemFont(ofSize: 30, weight: .semibold)
+        videosTitle.textColor = .white
+        videosTitle.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(videosTitle)
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
@@ -62,34 +142,55 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         layout.minimumLineSpacing = gridSpacing
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
-        grid.contentInsetAdjustmentBehavior = .never        // don't let overscan eat the width
+        grid.contentInsetAdjustmentBehavior = .never
         grid.dataSource = self
         grid.delegate = self
+        grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 10, left: gridInset, bottom: 40, right: gridInset)
+        grid.contentInset = UIEdgeInsets(top: 4, left: sideInset, bottom: 40, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
-        spinner.color = .white
-        spinner.hidesWhenStopped = true
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(spinner)
-
         NSLayoutConstraint.activate([
-            avatar.widthAnchor.constraint(equalToConstant: 120),
-            avatar.heightAnchor.constraint(equalToConstant: 120),
-            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 30),
-            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 80),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -80),
-            grid.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 26),
+            videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
+            videosTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
+            grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 14),
             grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             grid.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
-        load()
     }
+
+    /// Subtle, native-looking back affordance top-left. Navigation itself is the
+    /// remote's Menu/Back button (tvOS convention), this just signals it.
+    private func setupBackHint() {
+        let chip = UIStackView()
+        chip.axis = .horizontal
+        chip.spacing = 10
+        chip.alignment = .center
+        chip.isLayoutMarginsRelativeArrangement = true
+        chip.directionalLayoutMargins = .init(top: 10, leading: 18, bottom: 10, trailing: 22)
+        chip.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        chip.layer.cornerRadius = 24
+        chip.translatesAutoresizingMaskIntoConstraints = false
+
+        let icon = UIImageView(image: UIImage(systemName: "chevron.backward",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)))
+        icon.tintColor = .white
+        let label = UILabel()
+        label.text = "Back"
+        label.font = .systemFont(ofSize: 22, weight: .semibold)
+        label.textColor = .white
+        chip.addArrangedSubview(icon)
+        chip.addArrangedSubview(label)
+        view.addSubview(chip)
+        NSLayoutConstraint.activate([
+            chip.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            chip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+        ])
+    }
+
+    // MARK: data
 
     private func load() {
         spinner.startAnimating()
@@ -104,8 +205,20 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
+    private func applyHeader() {
+        avatar.setImage(user?.avatar)
+        backdrop.setImage(user?.avatar)
+        nameLabel.text = user?.nickname ?? "@\(username)"
+        handleLabel.text = "@\(username)"
+        followersStat.set(Format.count(user?.followers), "Followers")
+        followingStat.set(Format.count(user?.following), "Following")
+        likesStat.set(Format.count(user?.likes), "Likes")
+        bioLabel.text = user?.signature
+        bioLabel.isHidden = (user?.signature?.isEmpty != false)
+    }
+
     // The flow layout can be first queried before the grid knows its real width
-    // (it ends up showing too few columns). Re-query once the width settles.
+    // (it then shows too few columns). Re-query once the width settles.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         if grid.bounds.width != lastGridWidth {
@@ -114,22 +227,12 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
-    // Guarantee a fixed number of columns regardless of inset/overscan quirks.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
         let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
-        let usable = width - gridInset * 2 - gridSpacing * (gridColumns - 1)
+        let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
         let w = floor(usable / gridColumns)
         return CGSize(width: w, height: w * 16.0 / 9.0)
-    }
-
-    private func applyHeader() {
-        avatar.setImage(user?.avatar)
-        nameLabel.text = user?.nickname ?? "@\(username)"
-        statsLabel.text = "\(Format.count(user?.following)) Following    "
-            + "\(Format.count(user?.followers)) Followers    "
-            + "\(Format.count(user?.likes)) Likes"
-        bioLabel.text = user?.signature
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }
@@ -164,46 +267,103 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [grid] }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
+
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         if presses.contains(where: { $0.type == .menu }) { dismiss(animated: true) }
         else { super.pressesBegan(presses, with: event) }
     }
 }
 
+/// One stat column: big number over a small caption (TikTok-style).
+final class StatView: UIView {
+    private let value = UILabel()
+    private let caption = UILabel()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        value.font = .systemFont(ofSize: 30, weight: .bold)
+        value.textColor = .white
+        caption.font = .systemFont(ofSize: 18, weight: .medium)
+        caption.textColor = UIColor(white: 1, alpha: 0.6)
+        let s = UIStackView(arrangedSubviews: [value, caption])
+        s.axis = .vertical
+        s.spacing = 2
+        s.alignment = .leading
+        s.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(s)
+        NSLayoutConstraint.activate([
+            s.topAnchor.constraint(equalTo: topAnchor),
+            s.bottomAnchor.constraint(equalTo: bottomAnchor),
+            s.leadingAnchor.constraint(equalTo: leadingAnchor),
+            s.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+    func set(_ v: String, _ c: String) { value.text = v; caption.text = c }
+}
+
+/// Rounded poster card with a play-count overlay; lifts and shadows on focus.
 final class GridCell: UICollectionViewCell {
     private let cover = AsyncImageView()
+    private let gradient = CAGradientLayer()
     private let plays = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        contentView.layer.cornerRadius = 12
+        contentView.clipsToBounds = true
+        contentView.backgroundColor = UIColor(white: 0.12, alpha: 1)
+
         cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(cover)
-        contentView.layer.cornerRadius = 8
-        contentView.clipsToBounds = true
 
-        plays.font = .systemFont(ofSize: 16, weight: .semibold)
+        gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
+        contentView.layer.addSublayer(gradient)
+
+        plays.font = .systemFont(ofSize: 18, weight: .bold)
         plays.textColor = .white
         plays.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(plays)
         NSLayoutConstraint.activate([
-            plays.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            plays.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            plays.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            plays.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
         ])
+
+        // Shadow lives on the (unclipped) cell layer so it shows when focused.
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOffset = CGSize(width: 0, height: 12)
+        layer.shadowRadius = 20
+        layer.shadowOpacity = 0
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        gradient.frame = CGRect(x: 0, y: contentView.bounds.height - 120,
+                                width: contentView.bounds.width, height: 120)
+    }
 
     func configure(_ v: FeedItem) {
         cover.setImage(v.cover)
         plays.text = "▶ \(Format.count(v.plays))"
     }
 
-    // Grow when focused, like tvOS posters.
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         coordinator.addCoordinatedAnimations({
-            self.transform = self.isFocused ? CGAffineTransform(scaleX: 1.12, y: 1.12) : .identity
+            let focused = self.isFocused
+            self.transform = focused ? CGAffineTransform(scaleX: 1.1, y: 1.1) : .identity
+            self.layer.shadowOpacity = focused ? 0.5 : 0
+            self.contentView.layer.borderWidth = focused ? 3 : 0
+            self.contentView.layer.borderColor = UIColor.white.cgColor
         })
     }
 }
