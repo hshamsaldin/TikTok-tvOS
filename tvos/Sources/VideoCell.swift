@@ -11,12 +11,15 @@ final class VideoCell: UICollectionViewCell {
     private let stage = UIView()          // centered 9:16 video frame
     private let playerLayer = AVPlayerLayer()
     private let gradient = CAGradientLayer()
-    private let safeMargin: CGFloat = 40  // small top/bottom inset (video bigger, still safe)
+    private let safeMargin: CGFloat = 20  // minimal top/bottom inset (video as tall as safely possible)
 
     private var player: AVPlayer?
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var statusObs: NSKeyValueObservation?
     private var currentID: String?
+    private var appMuted = false          // user's desired mute state
+    private var isActive = false          // true only while this is the on-screen cell
 
     // overlay
     private let authorLabel = UILabel()
@@ -179,6 +182,22 @@ final class VideoCell: UICollectionViewCell {
         player = p
         playerLayer.player = p
 
+        // React to the item becoming playable (or failing). On tvOS the audio
+        // route often isn't engaged until *after* the item is ready, which is why
+        // a manual mute→unmute makes sound appear. We automate that here.
+        statusObs = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard let self else { return }
+            switch item.status {
+            case .readyToPlay:
+                self.activateAudioSession()
+                self.kickAudio()                       // mute→unmute to force audio attach
+            case .failed:
+                if self.isActive { self.onEnded?() }   // skip a dead/blurred clip
+            default:
+                break
+            }
+        }
+
         // Autoscroll: advance when *this* item finishes (scoped to avoid cross-cell fires).
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main
@@ -286,24 +305,44 @@ final class VideoCell: UICollectionViewCell {
 
     func play() {
         guard let player else { return }
-        // Ensure the audio route is active right when playback starts (most
-        // reliable timing on tvOS — app-init can be too early).
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback)
-        try? session.setActive(true)
-        player.isMuted = false
+        isActive = true
+        activateAudioSession()
+        player.isMuted = appMuted
         player.seek(to: .zero)
         fillWidth.constant = 0
         player.play()
+        // If the item is already ready (reused/prewarmed), kick audio now too.
+        if player.currentItem?.status == .readyToPlay { kickAudio() }
     }
 
-    func pause() { player?.pause() }
+    func pause() { isActive = false; player?.pause() }
 
     func resume() { player?.play() }
 
     func setMuted(_ m: Bool) {
+        appMuted = m
         player?.isMuted = m
         muteIcon.isHidden = !m
+    }
+
+    /// tvOS needs an active `.playback`/`.moviePlayback` session for AVPlayer audio.
+    private func activateAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
+    }
+
+    /// Force the player to re-attach to the (now active) audio route by toggling
+    /// mute off→on→off. This is the programmatic version of the manual fix where
+    /// muting and unmuting makes silent clips start playing sound.
+    private func kickAudio() {
+        guard let player else { return }
+        player.isMuted = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let player = self.player else { return }
+            player.isMuted = self.appMuted
+            player.volume = 1.0
+        }
     }
 
     var isPlaying: Bool { (player?.rate ?? 0) > 0 }
@@ -317,9 +356,11 @@ final class VideoCell: UICollectionViewCell {
     override var canBecomeFocused: Bool { false }
 
     private func teardownPlayer() {
+        isActive = false
         player?.pause()
         if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
+        statusObs?.invalidate(); statusObs = nil
         playerLayer.player = nil
         player = nil
     }

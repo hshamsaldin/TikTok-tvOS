@@ -17,7 +17,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let spinner = UIActivityIndicatorView(style: .large)
     private let gridColumns: CGFloat = 6
     private let gridSpacing: CGFloat = 16
-    private let gridInset: CGFloat = 60
+    private let gridInset: CGFloat = 40
+    private var lastGridWidth: CGFloat = 0
 
     init(username: String) {
         self.username = username
@@ -65,7 +66,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.dataSource = self
         grid.delegate = self
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 10, left: 60, bottom: 40, right: 60)
+        grid.contentInset = UIEdgeInsets(top: 10, left: gridInset, bottom: 40, right: gridInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
@@ -103,10 +104,21 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
+    // The flow layout can be first queried before the grid knows its real width
+    // (it ends up showing too few columns). Re-query once the width settles.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if grid.bounds.width != lastGridWidth {
+            lastGridWidth = grid.bounds.width
+            grid.collectionViewLayout.invalidateLayout()
+        }
+    }
+
     // Guarantee a fixed number of columns regardless of inset/overscan quirks.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let usable = cv.bounds.width - gridInset * 2 - gridSpacing * (gridColumns - 1)
+        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
+        let usable = width - gridInset * 2 - gridSpacing * (gridColumns - 1)
         let w = floor(usable / gridColumns)
         return CGSize(width: w, height: w * 16.0 / 9.0)
     }
