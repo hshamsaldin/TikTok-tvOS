@@ -8,9 +8,10 @@ final class VideoCell: UICollectionViewCell {
 
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let videoContainer = UIView()
+    private let stage = UIView()          // centered 9:16 video frame
     private let playerLayer = AVPlayerLayer()
     private let gradient = CAGradientLayer()
+    private let safeMargin: CGFloat = 60  // keep controls out of tvOS overscan
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -50,14 +51,26 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func setupVideo() {
-        videoContainer.frame = contentView.bounds
-        videoContainer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.addSubview(videoContainer)
+        // Centered 9:16 "phone frame", full screen height. The blurred bg fills
+        // the rest of the screen behind it; overlays anchor to this frame.
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        stage.layer.cornerRadius = 18
+        stage.layer.masksToBounds = true
+        contentView.addSubview(stage)
+        NSLayoutConstraint.activate([
+            // inset top/bottom by the overscan margin so the frame + rounded
+            // corners are fully visible and never clipped by the TV bezel.
+            stage.topAnchor.constraint(equalTo: contentView.topAnchor, constant: safeMargin),
+            stage.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -safeMargin),
+            stage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0),
+        ])
+
         playerLayer.videoGravity = .resizeAspect
-        videoContainer.layer.addSublayer(playerLayer)
+        stage.layer.addSublayer(playerLayer)
 
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
-        videoContainer.layer.addSublayer(gradient)
+        stage.layer.addSublayer(gradient)
     }
 
     private func setupOverlay() {
@@ -94,7 +107,8 @@ final class VideoCell: UICollectionViewCell {
         contentView.addSubview(rail)
 
         progress.progressTintColor = .white
-        progress.trackTintColor = UIColor(white: 1, alpha: 0.25)
+        progress.trackTintColor = UIColor(white: 1, alpha: 0.3)
+        progress.transform = CGAffineTransform(scaleX: 1, y: 2.5) // thin by default; thicken for TV
         progress.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(progress)
 
@@ -106,26 +120,31 @@ final class VideoCell: UICollectionViewCell {
         contentView.addSubview(muteIcon)
 
         NSLayoutConstraint.activate([
-            muteIcon.topAnchor.constraint(equalTo: contentView.safeAreaLayoutGuide.topAnchor, constant: 30),
-            muteIcon.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 70),
-            meta.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 70),
-            meta.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -70),
-            meta.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.55),
+            muteIcon.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
+            muteIcon.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 16),
 
-            rail.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -70),
-            rail.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -90),
+            // progress bar along the video's bottom
+            progress.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 10),
+            progress.trailingAnchor.constraint(equalTo: stage.trailingAnchor, constant: -10),
+            progress.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -8),
 
-            progress.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            progress.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            progress.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            // caption/sound at the video's bottom-left
+            meta.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 20),
+            meta.trailingAnchor.constraint(lessThanOrEqualTo: stage.trailingAnchor, constant: -20),
+            meta.bottomAnchor.constraint(equalTo: progress.topAnchor, constant: -12),
+
+            // rail just outside the video's right edge
+            rail.leadingAnchor.constraint(equalTo: stage.trailingAnchor, constant: 24),
+            rail.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -8),
         ])
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        playerLayer.frame = videoContainer.bounds
-        gradient.frame = CGRect(x: 0, y: contentView.bounds.height - 420,
-                                width: contentView.bounds.width, height: 420)
+        playerLayer.frame = stage.bounds
+        let g: CGFloat = 360
+        gradient.frame = CGRect(x: 0, y: max(0, stage.bounds.height - g),
+                                width: stage.bounds.width, height: g)
     }
 
     // MARK: configure
@@ -146,6 +165,8 @@ final class VideoCell: UICollectionViewCell {
         let playerItem = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: playerItem)
         p.actionAtItemEnd = .pause
+        p.isMuted = false
+        p.volume = 1.0
         player = p
         playerLayer.player = p
 

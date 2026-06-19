@@ -39,6 +39,10 @@ struct ContentView: View {
                 ProgressView().tint(.white).scaleEffect(2)
             }
         }
-        .task { await service.load() }
+        .task {
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            await service.load()
+        }
     }
 }

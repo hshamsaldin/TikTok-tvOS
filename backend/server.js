@@ -51,7 +51,9 @@ function ensureLocalFile(id) {
       '-o', out, '--no-part', '--no-warnings', '--quiet',
       // Prefer h264 (+aac) up to MAX_VIDEO_WIDTH (vertical, so filter by width).
       // Merge if that rendition is video-only; fall back to any h264, then anything.
-      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/bv*[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]+ba/b[vcodec^=h264]/bv*[vcodec^=h264]+ba/b`,
+      // Prefer combined h264 (has audio); if a clip is h265-only, still merge in
+      // best audio (bv*+ba) so it's never silent. Final /b is a last resort.
+      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/bv*[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]+ba/b[vcodec^=h264]/bv*[vcodec^=h264]+ba/bv*+ba/b`,
       '--merge-output-format', 'mp4',
       ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : []),
       `https://www.tiktok.com/@_/video/${id}`,

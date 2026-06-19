@@ -9,6 +9,7 @@ final class FeedViewController: UIViewController,
     var loadMore: (() async -> [FeedItem])?
 
     private var collectionView: UICollectionView!
+    private let inputView = RemoteInputView()   // focusable layer that captures the remote
     private weak var currentCell: VideoCell?
     private var isLoadingMore = false
     private var muted = false
@@ -49,8 +50,17 @@ final class FeedViewController: UIViewController,
         collectionView.register(VideoCell.self, forCellWithReuseIdentifier: Self.cellID)
         view.addSubview(collectionView)
 
+        // Transparent focusable overlay on top — without something focusable,
+        // tvOS doesn't route the remote's swipes/clicks to our recognizers.
+        inputView.frame = view.bounds
+        inputView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        inputView.backgroundColor = .clear
+        view.addSubview(inputView)
+
         addRemoteGestures()
     }
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [inputView] }
 
     private func addRemoteGestures() {
         let up = UISwipeGestureRecognizer(target: self, action: #selector(goNext))
@@ -61,19 +71,28 @@ final class FeedViewController: UIViewController,
         right.direction = .right
         let left = UISwipeGestureRecognizer(target: self, action: #selector(openProfile))
         left.direction = .left
-        [up, down, right, left].forEach { view.addGestureRecognizer($0) }
-
-        let tap = UITapGestureRecognizer(target: self, action: #selector(togglePlay))
-        tap.allowedPressTypes = [
-            NSNumber(value: UIPress.PressType.select.rawValue),
-            NSNumber(value: UIPress.PressType.playPause.rawValue),
-        ]
-        view.addGestureRecognizer(tap)
+        [up, down, right, left].forEach { inputView.addGestureRecognizer($0) }
 
         // App-level mute (with on-screen indicator) — the hardware mute button
         // mutes system audio but can't be detected by the app.
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(toggleMute))
-        view.addGestureRecognizer(longPress)
+        inputView.addGestureRecognizer(longPress)
+    }
+
+    // Directional CLICKS (and select/play-pause) — most reliable remote input on tvOS.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var handled = true
+        for press in presses {
+            switch press.type {
+            case .upArrow: goPrev()
+            case .downArrow: goNext()
+            case .leftArrow: openProfile()
+            case .rightArrow: openComments()
+            case .select, .playPause: togglePlay()
+            default: handled = false
+            }
+        }
+        if !handled { super.pressesBegan(presses, with: event) }
     }
 
     override func viewDidLayoutSubviews() {
@@ -86,7 +105,12 @@ final class FeedViewController: UIViewController,
 
     // Pause when covered (e.g. profile pushed on top); resume when back.
     override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); currentCell?.pause() }
-    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); currentCell?.resume() }
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        currentCell?.resume()
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
+    }
 
     private var currentItem: FeedItem? {
         let i = currentIndex
@@ -169,4 +193,9 @@ final class FeedViewController: UIViewController,
             isLoadingMore = false
         }
     }
+}
+
+/// Transparent, focusable overlay so tvOS routes the Siri Remote to the feed.
+final class RemoteInputView: UIView {
+    override var canBecomeFocused: Bool { true }
 }
