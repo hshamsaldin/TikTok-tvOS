@@ -40,19 +40,24 @@ async function getResolved(id) {
 // we let yt-dlp download the clip to a temp file, then serve that file with
 // Range support. Cached on disk per id; concurrent requests share one download.
 const downloads = new Map(); // id -> Promise<filePath>
+// Final served file. The "-aac" suffix also invalidates any older cache that
+// still has the silent HE-AACv2 track, so those get re-processed automatically.
+const localFileFor = (id) => path.join(os.tmpdir(), `tt-${id}-aac.mp4`);
+
 function ensureLocalFile(id) {
-  const out = path.join(os.tmpdir(), `tt-${id}.mp4`);
+  const out = localFileFor(id);
   if (fs.existsSync(out) && fs.statSync(out).size > 0) return Promise.resolve(out);
   if (downloads.has(id)) return downloads.get(id);
+
+  const src = path.join(os.tmpdir(), `tt-${id}.src.mp4`);
+  const ok = (f) => fs.existsSync(f) && fs.statSync(f).size > 0;
 
   const p = new Promise((resolve, reject) => {
     const args = [
       ...YTDLP_ARGS_PREFIX,
-      '-o', out, '--no-part', '--no-warnings', '--quiet',
+      '-o', src, '--no-part', '--no-warnings', '--quiet',
       // Prefer h264 (+aac) up to MAX_VIDEO_WIDTH (vertical, so filter by width).
       // Merge if that rendition is video-only; fall back to any h264, then anything.
-      // Prefer combined h264 (has audio); if a clip is h265-only, still merge in
-      // best audio (bv*+ba) so it's never silent. Final /b is a last resort.
       '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/bv*[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]+ba/b[vcodec^=h264]/bv*[vcodec^=h264]+ba/bv*+ba/b`,
       '--merge-output-format', 'mp4',
       ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : []),
@@ -63,9 +68,44 @@ function ensureLocalFile(id) {
     child.stderr.on('data', (d) => (err += d));
     child.on('error', reject);
     child.on('close', (code) => {
-      downloads.delete(id);
-      if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) resolve(out);
-      else reject(new Error(`download failed (${code}): ${err.slice(-200)}`));
+      if (!(code === 0 && ok(src))) {
+        downloads.delete(id);
+        reject(new Error(`download failed (${code}): ${err.slice(-200)}`));
+        return;
+      }
+      // TikTok ships HE-AACv2 audio, which tvOS AVPlayer plays SILENTLY (the track
+      // is present + "playing" but the hardware PS decoder outputs nothing). Remux
+      // with the audio transcoded to plain AAC-LC (video copied, no quality loss),
+      // which every Apple device plays reliably. +faststart for instant playback.
+      if (!FFMPEG) {
+        try { fs.renameSync(src, out); } catch {}
+        downloads.delete(id);
+        return ok(out) ? resolve(out) : reject(new Error('download produced empty file'));
+      }
+      const ff = spawn(FFMPEG, [
+        '-y', '-i', src,
+        '-c:v', 'copy', '-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '44100', '-b:a', '128k',
+        '-movflags', '+faststart', out,
+      ], { windowsHide: true });
+      let ferr = '';
+      ff.stderr.on('data', (d) => (ferr += d));
+      ff.on('close', (fcode) => {
+        downloads.delete(id);
+        if (fcode === 0 && ok(out)) {
+          try { fs.unlinkSync(src); } catch {}
+          resolve(out);
+        } else {
+          // Transcode failed — fall back to the original so the clip still plays
+          // (may be silent, but better than nothing).
+          try { fs.renameSync(src, out); } catch {}
+          ok(out) ? resolve(out) : reject(new Error(`transcode failed (${fcode}): ${ferr.slice(-200)}`));
+        }
+      });
+      ff.on('error', () => {
+        downloads.delete(id);
+        try { fs.renameSync(src, out); } catch {}
+        ok(out) ? resolve(out) : reject(new Error('ffmpeg spawn failed'));
+      });
     });
   });
   downloads.set(id, p);
