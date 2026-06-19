@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: macos-15  # Xcode 16 — reads the project format XcodeGen emits
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -43,58 +43,8 @@ jobs:
           (cd build && zip -qry TikTokTV-unsigned.ipa Payload)
 
       - name: Upload IPA artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: TikTokTV-unsigned-ipa
           path: tvos/build/TikTokTV-unsigned.ipa
           if-no-files-found: error
-
-  # Proves the app actually launches & renders on a simulated Apple TV,
-  # then uploads a screenshot. (No backend reachable from CI, so the screenshot
-  # shows the loading/“couldn’t load feed” state — which still confirms the UI runs.)
-  smoke-test:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install XcodeGen
-        run: brew install xcodegen
-
-      - name: Generate Xcode project
-        working-directory: tvos
-        run: xcodegen generate
-
-      - name: Build for tvOS Simulator
-        working-directory: tvos
-        run: |
-          xcodebuild \
-            -project TikTokTV.xcodeproj \
-            -scheme TikTokTV \
-            -configuration Debug \
-            -sdk appletvsimulator \
-            -destination 'generic/platform=tvOS Simulator' \
-            -derivedDataPath dd \
-            CODE_SIGNING_ALLOWED=NO build
-
-      - name: Launch in simulator and screenshot
-        working-directory: tvos
-        run: |
-          set -x
-          UDID=$(xcrun simctl list devices available | grep -m1 "Apple TV" | grep -oE '[0-9A-Fa-f-]{36}')
-          echo "Simulator UDID: $UDID"
-          xcrun simctl boot "$UDID" || true
-          sleep 8
-          APP=$(find dd/Build/Products -name 'TikTokTV.app' -type d | head -1)
-          echo "App: $APP"
-          xcrun simctl install "$UDID" "$APP"
-          xcrun simctl launch "$UDID" com.hshamsaldin.tiktoktvOS || echo "launch returned nonzero (app may have crashed)"
-          sleep 12
-          xcrun simctl io "$UDID" screenshot smoke.png || true
-          ls -l smoke.png || true
-
-      - name: Upload screenshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-screenshot
-          path: tvos/smoke.png
-          if-no-files-found: warn

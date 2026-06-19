@@ -112,12 +112,38 @@ function ensureLocalFile(id) {
   return p;
 }
 
-// Download the next few feed clips ahead of time so scrolling stays smooth.
+// Background prefetch with limited concurrency: warm upcoming clips ahead of time
+// WITHOUT starving the clip the user is watching right now (that one is fetched
+// on-demand and ungated). The audio transcode is CPU-bound, so kicking off too
+// many at once just makes everything — including the current video — slower.
+const PREFETCH_CONCURRENCY = 2;
+let prefetchActive = 0;
+const prefetchQueue = [];
+
+function queuePrefetch(id) {
+  const out = localFileFor(id);
+  if ((fs.existsSync(out) && fs.statSync(out).size > 0) || downloads.has(id)) return;
+  if (prefetchQueue.includes(id)) return;
+  prefetchQueue.push(id);
+  drainPrefetch();
+}
+
+function drainPrefetch() {
+  while (prefetchActive < PREFETCH_CONCURRENCY && prefetchQueue.length) {
+    const id = prefetchQueue.shift();
+    prefetchActive++;
+    ensureLocalFile(id)
+      .catch(() => {})
+      .finally(() => { prefetchActive--; drainPrefetch(); });
+  }
+}
+
+// Warm the next few clips ahead of the one being watched so scrolling stays smooth.
 function prefetchAround(id) {
   const data = feedCache.data || [];
   const i = data.findIndex((it) => it.id === id);
   if (i < 0) return;
-  data.slice(i + 1, i + 5).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+  data.slice(i + 1, i + 4).forEach((it) => queuePrefetch(it.id));
 }
 
 // ---- tiny in-memory caches ----
@@ -212,8 +238,9 @@ async function buildFeed() {
 
   const items = await getFeedItems();
   feedCache = { ts: Date.now(), data: items };
-  // Warm the first several clips so the opening videos play instantly.
-  items.slice(0, 6).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+  // Warm the first several clips so the opening videos play instantly (queued
+  // at limited concurrency so they don't all fight for CPU/network at once).
+  items.slice(0, 5).forEach((it) => queuePrefetch(it.id));
   primeMore(); // start fetching the next batch now, while the user watches this one
   return items;
 }
@@ -252,7 +279,7 @@ const server = http.createServer(async (req, res) => {
       const items = (await moreBuffer) || [];
       moreBuffer = null;
       primeMore(); // begin the batch after this one
-      items.slice(0, 3).forEach((it) => ensureLocalFile(it.id).catch(() => {}));
+      items.slice(0, 3).forEach((it) => queuePrefetch(it.id));
       return send(res, 200, { items });
     }
 
