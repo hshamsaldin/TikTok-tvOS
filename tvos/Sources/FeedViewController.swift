@@ -41,7 +41,7 @@ final class FeedViewController: UIViewController,
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        collectionView.isPagingEnabled = true
+        // (tvOS has no isPagingEnabled; we page programmatically via scrollToItem)
         collectionView.backgroundColor = .black
         collectionView.showsVerticalScrollIndicator = false
         collectionView.dataSource = self
@@ -53,9 +53,9 @@ final class FeedViewController: UIViewController,
     }
 
     private func addRemoteGestures() {
-        let up = UISwipeGestureRecognizer(target: self, action: #selector(next))
+        let up = UISwipeGestureRecognizer(target: self, action: #selector(goNext))
         up.direction = .up
-        let down = UISwipeGestureRecognizer(target: self, action: #selector(prev))
+        let down = UISwipeGestureRecognizer(target: self, action: #selector(goPrev))
         down.direction = .down
         let right = UISwipeGestureRecognizer(target: self, action: #selector(openComments))
         right.direction = .right
@@ -119,8 +119,8 @@ final class FeedViewController: UIViewController,
         collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
     }
 
-    @objc private func next() { go(to: currentIndex + 1) }
-    @objc private func prev() { go(to: currentIndex - 1) }
+    @objc private func goNext() { go(to: currentIndex + 1) }
+    @objc private func goPrev() { go(to: currentIndex - 1) }
     @objc private func togglePlay() { currentCell?.togglePlayPause() }
 
     // MARK: data source
@@ -132,7 +132,7 @@ final class FeedViewController: UIViewController,
     func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = cv.dequeueReusableCell(withReuseIdentifier: Self.cellID, for: indexPath) as! VideoCell
         cell.configure(with: items[indexPath.item])
-        cell.onEnded = { [weak self] in self?.next() } // autoscroll
+        cell.onEnded = { [weak self] in self?.goNext() } // autoscroll
         return cell
     }
 

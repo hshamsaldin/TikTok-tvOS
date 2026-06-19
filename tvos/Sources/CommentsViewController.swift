@@ -32,7 +32,6 @@ final class CommentsViewController: UIViewController, UITableViewDataSource {
 
         table.dataSource = self
         table.backgroundColor = .clear
-        table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
         table.estimatedRowHeight = 120
         table.register(CommentCell.self, forCellReuseIdentifier: "c")
