@@ -9,7 +9,7 @@ final class FeedViewController: UIViewController,
     var loadMore: (() async -> [FeedItem])?
 
     private var collectionView: UICollectionView!
-    private let inputView = RemoteInputView()   // focusable layer that captures the remote
+    private let remoteView = RemoteInputView()   // focusable layer that captures the remote
     private weak var currentCell: VideoCell?
     private var isLoadingMore = false
     private var muted = false
@@ -52,15 +52,15 @@ final class FeedViewController: UIViewController,
 
         // Transparent focusable overlay on top — without something focusable,
         // tvOS doesn't route the remote's swipes/clicks to our recognizers.
-        inputView.frame = view.bounds
-        inputView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        inputView.backgroundColor = .clear
-        view.addSubview(inputView)
+        remoteView.frame = view.bounds
+        remoteView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        remoteView.backgroundColor = .clear
+        view.addSubview(remoteView)
 
         addRemoteGestures()
     }
 
-    override var preferredFocusEnvironments: [UIFocusEnvironment] { [inputView] }
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [remoteView] }
 
     private func addRemoteGestures() {
         let up = UISwipeGestureRecognizer(target: self, action: #selector(goNext))
@@ -71,12 +71,12 @@ final class FeedViewController: UIViewController,
         right.direction = .right
         let left = UISwipeGestureRecognizer(target: self, action: #selector(openProfile))
         left.direction = .left
-        [up, down, right, left].forEach { inputView.addGestureRecognizer($0) }
+        [up, down, right, left].forEach { remoteView.addGestureRecognizer($0) }
 
         // App-level mute (with on-screen indicator) — the hardware mute button
         // mutes system audio but can't be detected by the app.
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(toggleMute))
-        inputView.addGestureRecognizer(longPress)
+        remoteView.addGestureRecognizer(longPress)
     }
 
     // Directional CLICKS (and select/play-pause) — most reliable remote input on tvOS.
