@@ -11,7 +11,7 @@ final class VideoCell: UICollectionViewCell {
     private let stage = UIView()          // centered 9:16 video frame
     private let playerLayer = AVPlayerLayer()
     private let gradient = CAGradientLayer()
-    private let safeMargin: CGFloat = 60  // keep controls out of tvOS overscan
+    private let safeMargin: CGFloat = 40  // small top/bottom inset (video bigger, still safe)
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -24,7 +24,9 @@ final class VideoCell: UICollectionViewCell {
     private let soundRow = UIStackView()
     private let soundLabel = UILabel()
     private let rail = UIStackView()
-    private let progress = UIProgressView(progressViewStyle: .default)
+    private let progressTrack = UIView()
+    private let progressFill = UIView()
+    private var fillWidth: NSLayoutConstraint!
     private let muteIcon = UIImageView()
 
     override init(frame: CGRect) {
@@ -106,11 +108,12 @@ final class VideoCell: UICollectionViewCell {
         rail.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(rail)
 
-        progress.progressTintColor = .white
-        progress.trackTintColor = UIColor(white: 1, alpha: 0.3)
-        progress.transform = CGAffineTransform(scaleX: 1, y: 1.3) // slightly thicker for TV
-        progress.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(progress)
+        progressTrack.backgroundColor = UIColor(white: 1, alpha: 0.22)
+        progressTrack.translatesAutoresizingMaskIntoConstraints = false
+        progressFill.backgroundColor = .white
+        progressFill.translatesAutoresizingMaskIntoConstraints = false
+        progressTrack.addSubview(progressFill)
+        stage.addSubview(progressTrack)   // inside the rounded frame so ends are clipped
 
         muteIcon.image = UIImage(systemName: "speaker.slash.fill",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .semibold))
@@ -119,23 +122,29 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(muteIcon)
 
+        fillWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             muteIcon.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
             muteIcon.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 16),
 
-            // progress bar along the video's bottom
-            progress.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 10),
-            progress.trailingAnchor.constraint(equalTo: stage.trailingAnchor, constant: -10),
-            progress.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -8),
+            // thin progress bar along the very bottom edge of the video
+            progressTrack.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            progressTrack.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            progressTrack.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+            progressTrack.heightAnchor.constraint(equalToConstant: 5),
+            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
+            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
+            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
+            fillWidth,
 
             // caption/sound at the video's bottom-left
             meta.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 20),
             meta.trailingAnchor.constraint(lessThanOrEqualTo: stage.trailingAnchor, constant: -20),
-            meta.bottomAnchor.constraint(equalTo: progress.topAnchor, constant: -12),
+            meta.bottomAnchor.constraint(equalTo: progressTrack.topAnchor, constant: -16),
 
             // rail just outside the video's right edge
             rail.leadingAnchor.constraint(equalTo: stage.trailingAnchor, constant: 24),
-            rail.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -8),
+            rail.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -10),
         ])
     }
 
@@ -179,10 +188,11 @@ final class VideoCell: UICollectionViewCell {
         timeObserver = p.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.3, preferredTimescale: 600), queue: .main
         ) { [weak self] _ in
-            guard let it = self?.player?.currentItem else { return }
+            guard let self, let it = self.player?.currentItem else { return }
             let dur = CMTimeGetSeconds(it.duration)
             let cur = CMTimeGetSeconds(it.currentTime())
-            if dur.isFinite, dur > 0 { self?.progress.progress = Float(cur / dur) }
+            guard dur.isFinite, dur > 0 else { return }
+            self.fillWidth.constant = CGFloat(cur / dur) * self.progressTrack.bounds.width
         }
     }
 
@@ -276,8 +286,14 @@ final class VideoCell: UICollectionViewCell {
 
     func play() {
         guard let player else { return }
+        // Ensure the audio route is active right when playback starts (most
+        // reliable timing on tvOS — app-init can be too early).
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback)
+        try? session.setActive(true)
+        player.isMuted = false
         player.seek(to: .zero)
-        progress.progress = 0
+        fillWidth.constant = 0
         player.play()
     }
 
@@ -312,7 +328,7 @@ final class VideoCell: UICollectionViewCell {
         super.prepareForReuse()
         teardownPlayer()
         currentID = nil
-        progress.progress = 0
+        fillWidth.constant = 0
         bgImage.image = nil
         muteIcon.isHidden = true
     }

@@ -2,7 +2,8 @@ import UIKit
 
 /// Channel profile: header (avatar, name, stats, bio) + a grid of videos.
 /// Select a thumbnail to play that channel's videos. Menu closes it.
-final class ProfileViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegate {
+final class ProfileViewController: UIViewController, UICollectionViewDataSource,
+    UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
     private let username: String
     private var videos: [FeedItem] = []
     private var user: ProfileUser?
@@ -13,6 +14,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let statsLabel = UILabel()
     private let bioLabel = UILabel()
     private var grid: UICollectionView!
+    private let spinner = UIActivityIndicatorView(style: .large)
+    private let gridColumns: CGFloat = 6
+    private let gridSpacing: CGFloat = 16
+    private let gridInset: CGFloat = 60
 
     init(username: String) {
         self.username = username
@@ -52,9 +57,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
-        layout.minimumInteritemSpacing = 14
-        layout.minimumLineSpacing = 14
-        layout.itemSize = CGSize(width: 184, height: 327)   // ~9:16, more per row
+        layout.minimumInteritemSpacing = gridSpacing
+        layout.minimumLineSpacing = gridSpacing
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
         grid.contentInsetAdjustmentBehavior = .never        // don't let overscan eat the width
@@ -64,6 +68,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.contentInset = UIEdgeInsets(top: 10, left: 60, bottom: 40, right: 60)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
+
+        spinner.color = .white
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
 
         NSLayoutConstraint.activate([
             avatar.widthAnchor.constraint(equalToConstant: 120),
@@ -75,18 +84,31 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             grid.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
         load()
     }
 
     private func load() {
+        spinner.startAnimating()
         Task { @MainActor in
-            guard let data = await API.profile(username) else { return }
+            let data = await API.profile(username)
+            spinner.stopAnimating()
+            guard let data else { return }
             user = data.user
             videos = data.videos
             applyHeader()
             grid.reloadData()
         }
+    }
+
+    // Guarantee a fixed number of columns regardless of inset/overscan quirks.
+    func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
+                        sizeForItemAt indexPath: IndexPath) -> CGSize {
+        let usable = cv.bounds.width - gridInset * 2 - gridSpacing * (gridColumns - 1)
+        let w = floor(usable / gridColumns)
+        return CGSize(width: w, height: w * 16.0 / 9.0)
     }
 
     private func applyHeader() {
