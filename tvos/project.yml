@@ -12,7 +12,7 @@ targets:
       - Resources/Assets.xcassets
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.tiktoktv
+        PRODUCT_BUNDLE_IDENTIFIER: com.hshamsaldin.tiktoktvOS
         MARKETING_VERSION: "0.1"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
