@@ -34,8 +34,10 @@ final class VideoCell: UICollectionViewCell {
 
     // Temporary on-screen audio diagnostic (remove once sound is confirmed).
     static let showAudioDebug = true
+    static var livePlayers = 0          // tvOS silently drops audio with too many alive
     private let debugLabel = UILabel()
     private var sessionErr = "—"
+    private var retried = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -186,15 +188,20 @@ final class VideoCell: UICollectionViewCell {
 
         guard item.id != currentID else { return }
         currentID = item.id
+        retried = false
         teardownPlayer()
+        openStream(for: item.id)
+    }
 
-        let url = Config.backendBaseURL.appendingPathComponent("api/stream/\(item.id)")
+    private func openStream(for id: String) {
+        let url = Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
         let playerItem = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: playerItem)
         p.actionAtItemEnd = .pause
         p.isMuted = false
         p.volume = 1.0
         player = p
+        Self.livePlayers += 1
         playerLayer.player = p
 
         // React to the item becoming playable (or failing). On tvOS the audio
@@ -210,7 +217,20 @@ final class VideoCell: UICollectionViewCell {
             case .failed:
                 self.sessionErr = String("\(item.error.map { "\($0)" } ?? "fail")".prefix(40))
                 self.updateDebug()
-                if self.isActive { self.onEnded?() }   // skip a dead/blurred clip
+                // The first clip can still be downloading/transcoding — retry once
+                // (instead of instantly skipping, which caused the "first video
+                // blurred then jumps" behavior) before giving up.
+                if let id = self.currentID, !self.retried {
+                    self.retried = true
+                    self.teardownPlayer()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                        guard let self, self.currentID == id else { return }
+                        self.openStream(for: id)
+                        if self.isActive { self.play() }
+                    }
+                } else if self.isActive {
+                    self.onEnded?()                    // give up: skip a dead clip
+                }
             default:
                 break
             }
@@ -381,15 +401,20 @@ final class VideoCell: UICollectionViewCell {
 
     private func updateDebug() {
         guard Self.showAudioDebug else { return }
+        let session = AVAudioSession.sharedInstance()
         let audio = player?.currentItem?.tracks.filter { $0.assetTrack?.mediaType == .audio } ?? []
         let on = audio.filter { $0.isEnabled }.count
-        let cat = AVAudioSession.sharedInstance().category.rawValue
-            .replacingOccurrences(of: "AVAudioSessionCategory", with: "")
+        let cat = session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: "")
         let st = player?.currentItem?.status.rawValue ?? -9
-        debugLabel.text = "audioTrk:\(audio.count) on:\(on)\n"
+        let tcs = player?.timeControlStatus.rawValue ?? -9   // 0=paused 1=waiting 2=playing
+        let route = session.currentRoute.outputs.map {
+            $0.portType.rawValue.replacingOccurrences(of: "AVAudioSessionPort", with: "")
+        }.joined(separator: ",")
+        debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
             + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0)\n"
-            + "cat:\(cat) sess:\(sessionErr)\n"
-            + "status:\(st)"
+            + "cat:\(cat) sess:\(sessionErr) other:\(session.isOtherAudioPlaying)\n"
+            + "status:\(st) tcs:\(tcs)\n"
+            + "route:\(route.isEmpty ? "none" : route)"
         debugLabel.isHidden = false
     }
 
@@ -410,6 +435,7 @@ final class VideoCell: UICollectionViewCell {
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
         statusObs?.invalidate(); statusObs = nil
         playerLayer.player = nil
+        if player != nil { Self.livePlayers = max(0, Self.livePlayers - 1) }
         player = nil
     }
 
