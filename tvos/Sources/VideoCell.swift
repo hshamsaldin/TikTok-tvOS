@@ -32,6 +32,11 @@ final class VideoCell: UICollectionViewCell {
     private var fillWidth: NSLayoutConstraint!
     private let muteIcon = UIImageView()
 
+    // Temporary on-screen audio diagnostic (remove once sound is confirmed).
+    static let showAudioDebug = true
+    private let debugLabel = UILabel()
+    private var sessionErr = "—"
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .black
@@ -125,10 +130,20 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(muteIcon)
 
+        debugLabel.numberOfLines = 0
+        debugLabel.font = .monospacedSystemFont(ofSize: 18, weight: .semibold)
+        debugLabel.textColor = .systemYellow
+        debugLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+        debugLabel.isHidden = true
+        debugLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(debugLabel)
+
         fillWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             muteIcon.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
             muteIcon.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 16),
+            debugLabel.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
+            debugLabel.trailingAnchor.constraint(equalTo: stage.trailingAnchor, constant: -16),
 
             // thin progress bar along the very bottom edge of the video
             progressTrack.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
@@ -191,7 +206,10 @@ final class VideoCell: UICollectionViewCell {
             case .readyToPlay:
                 self.activateAudioSession()
                 self.kickAudio()                       // mute→unmute to force audio attach
+                self.updateDebug()
             case .failed:
+                self.sessionErr = String("\(item.error.map { "\($0)" } ?? "fail")".prefix(40))
+                self.updateDebug()
                 if self.isActive { self.onEnded?() }   // skip a dead/blurred clip
             default:
                 break
@@ -212,6 +230,7 @@ final class VideoCell: UICollectionViewCell {
             let cur = CMTimeGetSeconds(it.currentTime())
             guard dur.isFinite, dur > 0 else { return }
             self.fillWidth.constant = CGFloat(cur / dur) * self.progressTrack.bounds.width
+            self.updateDebug()
         }
     }
 
@@ -328,21 +347,50 @@ final class VideoCell: UICollectionViewCell {
     /// tvOS needs an active `.playback`/`.moviePlayback` session for AVPlayer audio.
     private func activateAudioSession() {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .moviePlayback)
-        try? session.setActive(true)
+        do {
+            try session.setCategory(.playback, mode: .moviePlayback)
+            try session.setActive(true)
+            sessionErr = "ok"
+        } catch {
+            sessionErr = String("\(error)".prefix(40))
+        }
     }
 
-    /// Force the player to re-attach to the (now active) audio route by toggling
-    /// mute off→on→off. This is the programmatic version of the manual fix where
-    /// muting and unmuting makes silent clips start playing sound.
+    /// Force the player to re-attach to the (now active) audio route. Mirrors the
+    /// manual fix (mute→unmute starts silent clips). The real human delay matters,
+    /// so we unmute ~0.4s later, not on the same runloop. Also force-enable the
+    /// audio track in case AVPlayer left it disabled.
     private func kickAudio() {
         guard let player else { return }
+        enableAudioTracks()
         player.isMuted = true
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self, let player = self.player else { return }
+            self.enableAudioTracks()
             player.isMuted = self.appMuted
             player.volume = 1.0
+            self.updateDebug()
         }
+    }
+
+    private func enableAudioTracks() {
+        player?.currentItem?.tracks.forEach {
+            if $0.assetTrack?.mediaType == .audio { $0.isEnabled = true }
+        }
+    }
+
+    private func updateDebug() {
+        guard Self.showAudioDebug else { return }
+        let audio = player?.currentItem?.tracks.filter { $0.assetTrack?.mediaType == .audio } ?? []
+        let on = audio.filter { $0.isEnabled }.count
+        let cat = AVAudioSession.sharedInstance().category.rawValue
+            .replacingOccurrences(of: "AVAudioSessionCategory", with: "")
+        let st = player?.currentItem?.status.rawValue ?? -9
+        debugLabel.text = "audioTrk:\(audio.count) on:\(on)\n"
+            + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0)\n"
+            + "cat:\(cat) sess:\(sessionErr)\n"
+            + "status:\(st)"
+        debugLabel.isHidden = false
     }
 
     var isPlaying: Bool { (player?.rate ?? 0) > 0 }
@@ -372,5 +420,6 @@ final class VideoCell: UICollectionViewCell {
         fillWidth.constant = 0
         bgImage.image = nil
         muteIcon.isHidden = true
+        debugLabel.isHidden = true
     }
 }
