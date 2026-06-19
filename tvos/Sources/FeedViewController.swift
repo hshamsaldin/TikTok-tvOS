@@ -43,6 +43,9 @@ final class FeedViewController: UIViewController,
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         // (tvOS has no isPagingEnabled; we page programmatically via scrollToItem)
+        // tvOS auto-insets scroll content for overscan — that shifts the video
+        // off-center and breaks paging. Turn it off so cells fill exactly.
+        collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.backgroundColor = .black
         collectionView.showsVerticalScrollIndicator = false
         collectionView.dataSource = self
@@ -89,6 +92,12 @@ final class FeedViewController: UIViewController,
             case .leftArrow: openProfile()
             case .rightArrow: openComments()
             case .select, .playPause: togglePlay()
+            case .menu:
+                if let presented = presentedViewController {
+                    presented.dismiss(animated: true)   // close comments/profile
+                } else {
+                    handled = false                     // at root → let tvOS go Home
+                }
             default: handled = false
             }
         }

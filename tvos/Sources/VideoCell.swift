@@ -108,7 +108,7 @@ final class VideoCell: UICollectionViewCell {
 
         progress.progressTintColor = .white
         progress.trackTintColor = UIColor(white: 1, alpha: 0.3)
-        progress.transform = CGAffineTransform(scaleX: 1, y: 2.5) // thin by default; thicken for TV
+        progress.transform = CGAffineTransform(scaleX: 1, y: 1.3) // slightly thicker for TV
         progress.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(progress)
 

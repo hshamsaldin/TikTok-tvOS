@@ -52,15 +52,16 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
-        layout.minimumInteritemSpacing = 16
-        layout.minimumLineSpacing = 16
-        layout.itemSize = CGSize(width: 200, height: 356)
+        layout.minimumInteritemSpacing = 14
+        layout.minimumLineSpacing = 14
+        layout.itemSize = CGSize(width: 184, height: 327)   // ~9:16, more per row
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
+        grid.contentInsetAdjustmentBehavior = .never        // don't let overscan eat the width
         grid.dataSource = self
         grid.delegate = self
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 10, left: 80, bottom: 40, right: 80)
+        grid.contentInset = UIEdgeInsets(top: 10, left: 60, bottom: 40, right: 60)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 

@@ -6,6 +6,7 @@ final class CommentsViewController: UIViewController, UITableViewDataSource {
     private var comments: [CommentItem] = []
     private let table = UITableView()
     private let titleLabel = UILabel()
+    private let panel = RemoteInputView()   // focusable so Back works even when empty
 
     init(videoID: String) {
         self.videoID = videoID
@@ -19,7 +20,6 @@ final class CommentsViewController: UIViewController, UITableViewDataSource {
         super.viewDidLoad()
         view.backgroundColor = UIColor.black.withAlphaComponent(0.4)
 
-        let panel = UIView()
         panel.backgroundColor = UIColor(white: 0.11, alpha: 1)
         panel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(panel)
@@ -67,6 +67,14 @@ final class CommentsViewController: UIViewController, UITableViewDataSource {
         let cell = t.dequeueReusableCell(withIdentifier: "c", for: ip) as! CommentCell
         cell.configure(comments[ip.row])
         return cell
+    }
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [panel] }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setNeedsFocusUpdate()
+        updateFocusIfNeeded()
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
