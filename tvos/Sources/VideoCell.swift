@@ -158,10 +158,10 @@ final class VideoCell: UICollectionViewCell {
         timeObserver = p.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.3, preferredTimescale: 600), queue: .main
         ) { [weak self] _ in
-            guard let it = self?.player?.currentItem, it.duration.isNumeric else { return }
+            guard let it = self?.player?.currentItem else { return }
             let dur = CMTimeGetSeconds(it.duration)
             let cur = CMTimeGetSeconds(it.currentTime())
-            if dur > 0 { self?.progress.progress = Float(cur / dur) }
+            if dur.isFinite, dur > 0 { self?.progress.progress = Float(cur / dur) }
         }
     }
 
