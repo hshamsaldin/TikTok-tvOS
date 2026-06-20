@@ -190,9 +190,7 @@ function ensureHls(id) {
       `https://www.tiktok.com/@_/video/${id}`,
     ], { windowsHide: true });
     const ff = spawn(FFMPEG, [
-      '-y', '-i', 'pipe:0',
-      '-c:v', 'copy',
-      '-c:a', 'aac', '-b:a', '128k', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+      '-y', '-i', 'pipe:0', '-c', 'copy',
       '-f', 'hls', '-hls_time', '3', '-hls_list_size', '0',
       '-hls_flags', 'independent_segments+temp_file',
       '-hls_segment_filename', path.join(dir, 's%d.ts'), playlist,

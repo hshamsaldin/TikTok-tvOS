@@ -14,7 +14,8 @@ final class VideoCell: UICollectionViewCell {
     private let stage = UIView()          // centered 9:16 video frame
     private let playerVC = AVPlayerViewController()
     private let gradient = CAGradientLayer()
-    private let safeMargin: CGFloat = 20  // small top/bottom inset, overscan-safe
+    private let safeMargin: CGFloat = 20
+    private let railReserve: CGFloat = 220   // keep room on the right for the action rail
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -72,9 +73,6 @@ final class VideoCell: UICollectionViewCell {
         stage.layer.cornerRadius = 18
         stage.layer.masksToBounds = true
         contentView.addSubview(stage)
-        // The stage is the LARGEST rect of the video's aspect that fits the screen.
-        // Aspect starts at 9:16 and updates to the real video size once known, so the
-        // video fills the frame exactly (no black bars) and the blur fills around it.
         stageAspect = stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0)
         let grow = stage.heightAnchor.constraint(equalTo: contentView.heightAnchor, constant: -2 * safeMargin)
         grow.priority = .defaultHigh
@@ -82,7 +80,7 @@ final class VideoCell: UICollectionViewCell {
             stage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             stage.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             stage.heightAnchor.constraint(lessThanOrEqualTo: contentView.heightAnchor, constant: -2 * safeMargin),
-            stage.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -2 * safeMargin),
+            stage.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -(2 * safeMargin + railReserve)),
             grow, stageAspect,
         ])
 
