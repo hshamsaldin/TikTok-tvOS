@@ -253,24 +253,19 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
+    // Size strictly by the cover's TRUE aspect ratio (9:16 — what our TikTok video-
+    // frame covers actually are), matching how Apple's own MovieShelf sample sizes
+    // posters: by the real ratio first, never distorted to force a row count. A
+    // height cap here was squashing cards away from 9:16, which is what caused
+    // letterboxing — not a Fit-vs-Fill problem. The "next row peeks in" effect
+    // comes for free from the grid simply scrolling past the viewport edge, the
+    // same way Apple's shelves work — no artificial shrinking needed.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width  = cv.bounds.width  > 0 ? cv.bounds.width  : 1920
-        let height = cv.bounds.height > 0 ? cv.bounds.height : 1080
+        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
         let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
         let w = floor(usable / gridColumns)
-
-        // Cap the poster height so one full row fits in the grid's visible area,
-        // leaving headroom for the 1.1x focus scale → no top/bottom clipping.
-        let ideal = w * 16.0 / 9.0
-
-        // Cap so ~1.4 rows fit in the viewport: one full row plus a visible peek of
-        // the next, signaling there's more to scroll — not the whole viewport
-        // height stretched onto a single row (which squashed cards away from a
-        // real 9:16 cover ratio and caused letterboxing).
-        let available = height - cv.contentInset.top - cv.contentInset.bottom
-        let maxH = (available - gridSpacing) / 1.4
-        return CGSize(width: w, height: min(ideal, maxH))
+        return CGSize(width: w, height: w * 16.0 / 9.0)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }
@@ -362,17 +357,23 @@ final class GridCell: UICollectionViewCell {
         contentView.clipsToBounds = true
         contentView.backgroundColor = UIColor(white: 0.10, alpha: 1)
 
-        cover.contentMode = .scaleAspectFill
+        // .fit, matching Apple's MovieShelf sample — now that the cell's own
+        // frame is sized to the cover's true ratio, there's nothing to crop.
+        cover.contentMode = .scaleAspectFit
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(cover)
 
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
+        gradient.opacity = 0
         contentView.layer.addSublayer(gradient)
 
+        // Hidden until focused, like Apple's own MovieShelf/TVMusicShelf samples
+        // (.visibleWhenFocused()) — declutters the grid; metadata reveals on focus.
         plays.font = .app(ofSize: 18, weight: .bold)
         plays.textColor = .white
+        plays.alpha = 0
         plays.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(plays)
         NSLayoutConstraint.activate([
@@ -406,6 +407,8 @@ final class GridCell: UICollectionViewCell {
         transform = .identity
         layer.shadowOpacity = 0
         contentView.layer.borderWidth = 0
+        gradient.opacity = 0
+        plays.alpha = 0
     }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
@@ -415,6 +418,8 @@ final class GridCell: UICollectionViewCell {
             self.layer.shadowOpacity = focused ? 0.5 : 0
             self.contentView.layer.borderWidth = focused ? 3 : 0
             self.contentView.layer.borderColor = UIColor.white.cgColor
+            self.gradient.opacity = focused ? 1 : 0
+            self.plays.alpha = focused ? 1 : 0
         })
     }
 }
