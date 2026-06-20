@@ -28,7 +28,9 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let spinner = UIActivityIndicatorView(style: .large)
 
     private let gridColumns: CGFloat = 4
-    private let gridSpacing: CGFloat = 30
+    // Base gap between cards. Sized so that even when a card grows under the
+    // 1.05x focus zoom (~10pt per side) a clear, even gap to its neighbour remains.
+    private let gridSpacing: CGFloat = 48
     private let sideInset: CGFloat = 110
     private var lastGridWidth: CGFloat = 0
 
@@ -151,7 +153,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
 
-        grid.contentInset = UIEdgeInsets(top: 20, left: sideInset, bottom: 40, right: sideInset)
+        // Let the 1.1x focus scale + shadow float over neighbours instead of
+        // being clipped at the grid's edges.
+        grid.clipsToBounds = false
+        grid.contentInset = UIEdgeInsets(top: 40, left: sideInset, bottom: 60, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
@@ -230,10 +235,16 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
+        let width  = cv.bounds.width  > 0 ? cv.bounds.width  : 1920
+        let height = cv.bounds.height > 0 ? cv.bounds.height : 1080
         let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
         let w = floor(usable / gridColumns)
-        return CGSize(width: w, height: w * 16.0 / 9.0)
+
+        // Cap the poster height so one full row fits in the grid's visible area,
+        // leaving headroom for the 1.1x focus scale → no top/bottom clipping.
+        let ideal = w * 16.0 / 9.0
+        let maxH  = (height - cv.contentInset.top - cv.contentInset.bottom) / 1.06
+        return CGSize(width: w, height: min(ideal, maxH))
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }
@@ -358,7 +369,7 @@ final class GridCell: UICollectionViewCell {
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
         coordinator.addCoordinatedAnimations({
             let focused = self.isFocused
-            self.transform = focused ? CGAffineTransform(scaleX: 1.1, y: 1.1) : .identity
+            self.transform = focused ? CGAffineTransform(scaleX: 1.05, y: 1.05) : .identity
             self.layer.shadowOpacity = focused ? 0.5 : 0
             self.contentView.layer.borderWidth = focused ? 3 : 0
             self.contentView.layer.borderColor = UIColor.white.cgColor
