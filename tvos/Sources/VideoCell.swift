@@ -232,8 +232,14 @@ final class VideoCell: UICollectionViewCell {
         openStream(for: item.id)
     }
 
+    // TEMP isolation test: when set, every clip plays this known-good MP4 (h264 +
+    // AAC, definitely has audio). If THIS has sound on device, our backend file is
+    // the problem; if it's silent too, the app's audio path is. Set back to nil after.
+    static let audioTestURL: URL? = URL(string:
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4")
+
     private func openStream(for id: String) {
-        let url = Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
+        let url = Self.audioTestURL ?? Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
         let playerItem = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: playerItem)
         p.actionAtItemEnd = .pause
