@@ -36,8 +36,8 @@ final class VideoCell: UICollectionViewCell {
     private var fillWidth: NSLayoutConstraint!
     private let muteIcon = UIImageView()
 
-    // Temporary on-screen audio diagnostic (remove once sound is confirmed).
-    static let showAudioDebug = true
+    // On-screen audio diagnostic — off now that audio is confirmed working.
+    static let showAudioDebug = false
     static var livePlayers = 0          // tvOS silently drops audio with too many alive
     private let debugLabel = UILabel()
     private var retried = false
@@ -421,6 +421,9 @@ final class VideoCell: UICollectionViewCell {
         player.seek(to: .zero)
         fillWidth.constant = 0
         player.play()
+        // Become the Now Playing app so the remote's volume buttons control our audio.
+        NowPlayingCenter.activate()
+        NowPlayingCenter.update(title: authorLabel.text, artist: captionLabel.text)
     }
 
     // Activate the shared audio session a SINGLE time, lazily, at the first play.

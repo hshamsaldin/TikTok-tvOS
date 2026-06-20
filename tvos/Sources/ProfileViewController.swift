@@ -27,6 +27,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let likesStat = StatView()
     private let videosTitle = UILabel()
     private let backChip = UIStackView()
+    private var headerView: UIView!
 
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
@@ -50,6 +51,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         setupBackdrop()
         setupBackHint()                 // build the Back chip first…
         let header = setupHeader()      // …so the header can sit below it
+        headerView = header
         setupGrid(below: header)
 
         spinner.color = .white
@@ -60,6 +62,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
+
+        // Hide the header + grid until the data arrives, so we don't show an empty
+        // avatar/“Videos” skeleton. Only the Back chip + spinner show while loading.
+        [headerView, videosTitle, grid].forEach { $0?.alpha = 0 }
 
         load()
     }
@@ -203,6 +209,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             videos = data.videos
             applyHeader()
             grid.reloadData()
+            // Reveal the now-populated header + grid together.
+            UIView.animate(withDuration: 0.25) {
+                [self.headerView, self.videosTitle, self.grid].forEach { $0?.alpha = 1 }
+            }
         }
     }
 

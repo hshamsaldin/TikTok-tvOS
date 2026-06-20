@@ -160,7 +160,7 @@ function ensureLocalFile(id) {
 // WITHOUT starving the clip the user is watching right now (that one is fetched
 // on-demand and ungated). The audio transcode is CPU-bound, so kicking off too
 // many at once just makes everything — including the current video — slower.
-const PREFETCH_CONCURRENCY = 2;
+const PREFETCH_CONCURRENCY = 3;
 let prefetchActive = 0;
 const prefetchQueue = [];
 
@@ -187,7 +187,7 @@ function prefetchAround(id) {
   const data = feedCache.data || [];
   const i = data.findIndex((it) => it.id === id);
   if (i < 0) return;
-  data.slice(i + 1, i + 4).forEach((it) => queuePrefetch(it.id));
+  data.slice(i + 1, i + 7).forEach((it) => queuePrefetch(it.id));   // warm next 6
 }
 
 // ---- tiny in-memory caches ----
@@ -284,7 +284,7 @@ async function buildFeed() {
   feedCache = { ts: Date.now(), data: items };
   // Warm the first several clips so the opening videos play instantly (queued
   // at limited concurrency so they don't all fight for CPU/network at once).
-  items.slice(0, 5).forEach((it) => queuePrefetch(it.id));
+  items.slice(0, 8).forEach((it) => queuePrefetch(it.id));
   primeMore(); // start fetching the next batch now, while the user watches this one
   return items;
 }

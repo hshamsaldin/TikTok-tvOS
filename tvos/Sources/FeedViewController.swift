@@ -49,8 +49,8 @@ final class FeedViewController: UIViewController,
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.backgroundColor = .black
         collectionView.showsVerticalScrollIndicator = false
-        // Fewer AVPlayers alive at once → avoids tvOS silently starving the audio decoder.
-        collectionView.isPrefetchingEnabled = false
+        // Prefetch upcoming cells so their players are ready → smoother scrolling.
+        collectionView.isPrefetchingEnabled = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(VideoCell.self, forCellWithReuseIdentifier: Self.cellID)
