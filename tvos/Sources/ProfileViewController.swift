@@ -243,7 +243,9 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
         let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
         let w = floor(usable / gridColumns)
-        return CGSize(width: w, height: w * 16.0 / 9.0)
+        // 2:3 portrait posters — less extreme than 9:16, so the grid reads as a tidy
+        // grid (more rows visible) instead of one giant row with the next peeking.
+        return CGSize(width: w, height: w * 3.0 / 2.0)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }

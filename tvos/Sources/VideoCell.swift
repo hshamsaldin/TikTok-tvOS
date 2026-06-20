@@ -35,6 +35,7 @@ final class VideoCell: UICollectionViewCell {
     private let progressFill = UIView()
     private var fillWidth: NSLayoutConstraint!
     private let muteIcon = UIImageView()
+    private let loadingSpinner = UIActivityIndicatorView(style: .large)
 
     // On-screen audio diagnostic — off now that audio is confirmed working.
     static let showAudioDebug = false
@@ -105,6 +106,17 @@ final class VideoCell: UICollectionViewCell {
         // Gradient sits above the video but below the text overlays (added later).
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
         stage.layer.addSublayer(gradient)
+
+        // Spinner over the blurred cover while the clip loads (so it reads as
+        // "loading", not frozen).
+        loadingSpinner.color = .white
+        loadingSpinner.hidesWhenStopped = true
+        loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(loadingSpinner)
+        NSLayoutConstraint.activate([
+            loadingSpinner.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
+        ])
     }
 
     // Walk the responder chain to the hosting view controller so the player VC
@@ -254,6 +266,7 @@ final class VideoCell: UICollectionViewCell {
         player = p
         Self.livePlayers += 1
         playerVC.player = p
+        loadingSpinner.startAnimating()
 
         // Self-heal: if the player drops to paused while it should be running (the
         // real bug behind the silence — tcs:0 = paused, so no audio), nudge it back
@@ -265,9 +278,12 @@ final class VideoCell: UICollectionViewCell {
             // force the audio output to (re)engage. The user found a manual mute/
             // unmute makes a silent clip produce sound — this automates it now that
             // the player truly plays (earlier it was stuck paused so it couldn't help).
-            if player.timeControlStatus == .playing, self.isActive, !self.didKick {
-                self.didKick = true
-                self.kickAudio()
+            if player.timeControlStatus == .playing {
+                self.loadingSpinner.stopAnimating()       // clip is actually rolling
+                if self.isActive, !self.didKick {
+                    self.didKick = true
+                    self.kickAudio()
+                }
             }
             guard self.isActive, !self.userPaused,
                   player.timeControlStatus == .paused,
@@ -533,5 +549,6 @@ final class VideoCell: UICollectionViewCell {
         bgImage.image = nil
         muteIcon.isHidden = true
         debugLabel.isHidden = true
+        loadingSpinner.stopAnimating()
     }
 }
