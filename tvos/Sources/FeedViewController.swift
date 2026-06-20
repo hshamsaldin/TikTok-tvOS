@@ -25,10 +25,11 @@ final class FeedViewController: UIViewController,
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     func update(items: [FeedItem]) {
-        guard collectionView != nil else { self.items = items; return }
-        let added = items.count - self.items.count
-        self.items = items
-        if added > 0 { collectionView.reloadData() }
+        // Appends are handled by maybeLoadMore (insertItems), which keeps the
+        // playing cell alive. Calling reloadData here on every SwiftUI re-render
+        // tore down the active AVPlayer and left it PAUSED — the real cause of the
+        // stuck/silent video. So only seed items before the collection view exists.
+        if collectionView == nil { self.items = items }
     }
 
     override func viewDidLoad() {

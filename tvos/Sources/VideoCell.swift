@@ -22,6 +22,7 @@ final class VideoCell: UICollectionViewCell {
     private var appMuted = false          // user's desired mute state
     private var isActive = false          // true only while this is the on-screen cell
     private var userPaused = false        // true only when the user deliberately paused
+    private var tickCount = 0             // increments each playback tick (diagnostic)
 
     // overlay
     private let authorLabel = UILabel()
@@ -266,6 +267,7 @@ final class VideoCell: UICollectionViewCell {
             let cur = CMTimeGetSeconds(it.currentTime())
             guard dur.isFinite, dur > 0 else { return }
             self.fillWidth.constant = CGFloat(cur / dur) * self.progressTrack.bounds.width
+            self.tickCount += 1            // proves the clip is actually advancing
             self.updateDebug()
         }
     }
@@ -428,9 +430,9 @@ final class VideoCell: UICollectionViewCell {
             $0.portType.rawValue.replacingOccurrences(of: "AVAudioSessionPort", with: "")
         }.joined(separator: ",")
         debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
-            + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0)\n"
+            + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0) rate:\(player?.rate ?? -9)\n"
             + "cat:\(cat) sess:\(sessionErr) other:\(session.isOtherAudioPlaying)\n"
-            + "status:\(st) tcs:\(tcs)\n"
+            + "status:\(st) tcs:\(tcs) tick:\(tickCount)\n"
             + "route:\(route.isEmpty ? "none" : route)"
         debugLabel.isHidden = false
     }
