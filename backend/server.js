@@ -127,8 +127,12 @@ function ensureLocalFile(id) {
       // plays on tvOS. Otherwise transcode audio to AAC-LC (video copied either way).
       const ffArgs = SKIP_TRANSCODE
         ? ['-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out]
-        : ['-y', '-i', src, '-c:v', 'copy', '-c:a', 'aac', '-profile:a', 'aac_low',
-           '-ar', '44100', '-b:a', '128k', '-movflags', '+faststart', out];
+        : ['-y', '-i', src, '-c:v', 'copy',
+           // loudnorm = EBU R128 loudness normalization, so every clip plays at the
+           // same volume (TikTok clips vary wildly otherwise).
+           '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+           '-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '44100', '-b:a', '128k',
+           '-movflags', '+faststart', out];
       const ff = spawn(FFMPEG, ffArgs, { windowsHide: true });
       let ferr = '';
       ff.stderr.on('data', (d) => (ferr += d));
@@ -198,13 +202,33 @@ let feedCache = { ts: 0, data: null };
 const videoCache = new Map(); // id -> { ts, item }
 const commentsCache = new Map(); // id -> { ts, data }
 const userCache = new Map(); // username -> { ts, data }
-let moreBuffer = null; // Promise<items[]> for the next batch, prefetched in the background
+// Keep several batches of videos pre-scraped AND their first clips downloaded, so
+// the Apple TV never waits at a batch boundary. A background filler keeps the queue
+// topped up; /api/more just pops a ready batch.
+const READY_BATCHES = 2;          // how many batches to keep prepared ahead
+const readyBatches = [];          // [items[], items[], …] already scraped
+let filling = false;
 
-// Start fetching the next batch ahead of time (only one in flight).
-function primeMore() {
-  if (moreBuffer) return;
-  moreBuffer = getFeedItems().catch(() => null);
+async function fillBatches() {
+  if (filling) return;
+  filling = true;
+  try {
+    while (readyBatches.length < READY_BATCHES) {
+      const items = await getFeedItems().catch(() => null);
+      if (!items || !items.length) break;
+      readyBatches.push(items);
+      items.slice(0, 4).forEach((it) => queuePrefetch(it.id));   // warm its first clips
+    }
+  } finally {
+    filling = false;
+  }
 }
+
+// Back-compat shim: older call sites call primeMore() — just keep the queue full.
+function primeMore() { fillBatches(); }
+
+// Continuously keep the queue topped up so there's always a batch ready to serve.
+setInterval(fillBatches, 4000).unref();
 
 // Overlay fields. Prefer the feed entry's values (For-You item_list has stats +
 // avatar) over yt-dlp's, which lacks them.
@@ -319,13 +343,12 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { count: items.length, items });
     }
 
-    // Fresh batch for infinite scroll — served from the prefetched buffer so
-    // there's no wait at the boundary; immediately starts prefetching the next.
+    // Fresh batch for infinite scroll — pop a pre-scraped batch (no wait at the
+    // boundary) and refill the queue in the background.
     if (url.pathname === '/api/more') {
-      primeMore();
-      const items = (await moreBuffer) || [];
-      moreBuffer = null;
-      primeMore(); // begin the batch after this one
+      if (!readyBatches.length) await fillBatches();
+      const items = readyBatches.shift() || [];
+      fillBatches();
       items.slice(0, 3).forEach((it) => queuePrefetch(it.id));
       return send(res, 200, { items });
     }

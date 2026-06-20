@@ -182,11 +182,12 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         NSLayoutConstraint.activate([
             videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
             videosTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
-            // single row directly under "Videos" (no big empty band), fills ~half height
+            // single row that fills the space from under "Videos" down to the bottom
+            // (taller posters, no empty band below).
             grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 16),
             grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            grid.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.48),
+            grid.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
         ])
     }
 
