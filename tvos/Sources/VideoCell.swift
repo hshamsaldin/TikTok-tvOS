@@ -17,9 +17,11 @@ final class VideoCell: UICollectionViewCell {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var statusObs: NSKeyValueObservation?
+    private var tcsObs: NSKeyValueObservation?
     private var currentID: String?
     private var appMuted = false          // user's desired mute state
     private var isActive = false          // true only while this is the on-screen cell
+    private var userPaused = false        // true only when the user deliberately paused
 
     // overlay
     private let authorLabel = UILabel()
@@ -200,19 +202,33 @@ final class VideoCell: UICollectionViewCell {
         p.actionAtItemEnd = .pause
         p.isMuted = false
         p.volume = 1.0
+        p.automaticallyWaitsToMinimizeStalling = false   // start now, don't sit paused buffering
         player = p
         Self.livePlayers += 1
         playerLayer.player = p
 
-        // React to the item becoming playable (or failing). On tvOS the audio
-        // route often isn't engaged until *after* the item is ready, which is why
-        // a manual mute→unmute makes sound appear. We automate that here.
+        // Self-heal: if the player drops to paused while it should be running (the
+        // real bug behind the silence — tcs:0 = paused, so no audio), nudge it back
+        // to playing. Also refreshes the on-screen diagnostic on every transition.
+        tcsObs = p.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            guard let self else { return }
+            self.updateDebug()
+            guard self.isActive, !self.userPaused,
+                  player.timeControlStatus == .paused,
+                  player.currentItem?.status == .readyToPlay else { return }
+            let cur = CMTimeGetSeconds(player.currentTime())
+            let dur = CMTimeGetSeconds(player.currentItem?.duration ?? .zero)
+            if !(dur.isFinite && dur > 0 && cur >= dur - 0.3) { player.play() } // not at the end
+        }
+
+        // React to the item becoming playable (or failing).
         statusObs = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard let self else { return }
             switch item.status {
             case .readyToPlay:
                 self.activateAudioSession()
-                self.kickAudio()                       // mute→unmute to force audio attach
+                if self.isActive, !self.userPaused { self.player?.play() }  // make sure it runs
+                self.kickAudio()                       // ensure unmuted, audio attached
                 self.updateDebug()
             case .failed:
                 self.sessionErr = String("\(item.error.map { "\($0)" } ?? "fail")".prefix(40))
@@ -345,6 +361,7 @@ final class VideoCell: UICollectionViewCell {
     func play() {
         guard let player else { return }
         isActive = true
+        userPaused = false
         activateAudioSession()
         player.isMuted = appMuted
         player.seek(to: .zero)
@@ -356,7 +373,7 @@ final class VideoCell: UICollectionViewCell {
 
     func pause() { isActive = false; player?.pause() }
 
-    func resume() { player?.play() }
+    func resume() { isActive = true; userPaused = false; player?.play() }
 
     func setMuted(_ m: Bool) {
         appMuted = m
@@ -422,7 +439,8 @@ final class VideoCell: UICollectionViewCell {
 
     func togglePlayPause() {
         guard let player else { return }
-        if isPlaying { player.pause() } else { player.play() }
+        if isPlaying { userPaused = true; player.pause() }
+        else { userPaused = false; player.play() }
     }
 
     // We drive navigation with swipe gestures, so cells shouldn't grab focus.
@@ -434,6 +452,7 @@ final class VideoCell: UICollectionViewCell {
         if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
         statusObs?.invalidate(); statusObs = nil
+        tcsObs?.invalidate(); tcsObs = nil
         playerLayer.player = nil
         if player != nil { Self.livePlayers = max(0, Self.livePlayers - 1) }
         player = nil
