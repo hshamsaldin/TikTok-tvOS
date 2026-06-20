@@ -26,6 +26,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let followersStat = StatView()
     private let likesStat = StatView()
     private let videosTitle = UILabel()
+    private let backChip = UIStackView()
 
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
@@ -47,9 +48,9 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         view.backgroundColor = .black
 
         setupBackdrop()
-        let header = setupHeader()
+        setupBackHint()                 // build the Back chip first…
+        let header = setupHeader()      // …so the header can sit below it
         setupGrid(below: header)
-        setupBackHint()
 
         spinner.color = .white
         spinner.hidesWhenStopped = true
@@ -122,7 +123,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         NSLayoutConstraint.activate([
             avatar.widthAnchor.constraint(equalToConstant: 160),
             avatar.heightAnchor.constraint(equalToConstant: 160),
-            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+            // Sit below the Back chip so they never overlap in the top-left corner.
+            header.topAnchor.constraint(equalTo: backChip.bottomAnchor, constant: 20),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
             header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -sideInset),
         ])
@@ -164,15 +166,14 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     /// Subtle, native-looking back affordance top-left. Navigation itself is the
     /// remote's Menu/Back button (tvOS convention), this just signals it.
     private func setupBackHint() {
-        let chip = UIStackView()
-        chip.axis = .horizontal
-        chip.spacing = 10
-        chip.alignment = .center
-        chip.isLayoutMarginsRelativeArrangement = true
-        chip.directionalLayoutMargins = .init(top: 10, leading: 18, bottom: 10, trailing: 22)
-        chip.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-        chip.layer.cornerRadius = 24
-        chip.translatesAutoresizingMaskIntoConstraints = false
+        backChip.axis = .horizontal
+        backChip.spacing = 10
+        backChip.alignment = .center
+        backChip.isLayoutMarginsRelativeArrangement = true
+        backChip.directionalLayoutMargins = .init(top: 10, leading: 18, bottom: 10, trailing: 22)
+        backChip.backgroundColor = UIColor.black.withAlphaComponent(0.35)
+        backChip.layer.cornerRadius = 24
+        backChip.translatesAutoresizingMaskIntoConstraints = false
 
         let icon = UIImageView(image: UIImage(systemName: "chevron.backward",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)))
@@ -181,12 +182,12 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         label.text = "Back"
         label.font = .systemFont(ofSize: 22, weight: .semibold)
         label.textColor = .white
-        chip.addArrangedSubview(icon)
-        chip.addArrangedSubview(label)
-        view.addSubview(chip)
+        backChip.addArrangedSubview(icon)
+        backChip.addArrangedSubview(label)
+        view.addSubview(backChip)
         NSLayoutConstraint.activate([
-            chip.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            chip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
+            backChip.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            backChip.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 4),
         ])
     }
 
