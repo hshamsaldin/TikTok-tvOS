@@ -41,6 +41,7 @@ final class VideoCell: UICollectionViewCell {
     static var livePlayers = 0          // tvOS silently drops audio with too many alive
     private let debugLabel = UILabel()
     private var retried = false
+    private var didKick = false           // mute→unmute toggle done once per clip
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -228,6 +229,7 @@ final class VideoCell: UICollectionViewCell {
         guard item.id != currentID else { return }
         currentID = item.id
         retried = false
+        didKick = false
         teardownPlayer()
         openStream(for: item.id)
     }
@@ -259,6 +261,14 @@ final class VideoCell: UICollectionViewCell {
         tcsObs = p.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             guard let self else { return }
             self.updateDebug()
+            // The moment playback ACTUALLY starts, toggle mute off→on→off once to
+            // force the audio output to (re)engage. The user found a manual mute/
+            // unmute makes a silent clip produce sound — this automates it now that
+            // the player truly plays (earlier it was stuck paused so it couldn't help).
+            if player.timeControlStatus == .playing, self.isActive, !self.didKick {
+                self.didKick = true
+                self.kickAudio()
+            }
             guard self.isActive, !self.userPaused,
                   player.timeControlStatus == .paused,
                   player.currentItem?.status == .readyToPlay else { return }
@@ -439,6 +449,19 @@ final class VideoCell: UICollectionViewCell {
         appMuted = m
         player?.isMuted = m
         muteIcon.isHidden = !m
+    }
+
+    /// Mute then unmute after a real delay — forces AVPlayer to re-engage its audio
+    /// output. (Automates the manual mute/unmute that makes a silent clip play sound.)
+    private func kickAudio() {
+        guard let player else { return }
+        player.isMuted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, let player = self.player else { return }
+            player.isMuted = self.appMuted          // back to the user's setting (false)
+            player.volume = 1.0
+            self.updateDebug()
+        }
     }
 
     // AVPlayer pauses itself when the audio session is interrupted; resume the
