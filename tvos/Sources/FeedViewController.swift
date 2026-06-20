@@ -69,9 +69,9 @@ final class FeedViewController: UIViewController,
         up.direction = .up
         let down = UISwipeGestureRecognizer(target: self, action: #selector(goPrev))
         down.direction = .down
-        let left = UISwipeGestureRecognizer(target: self, action: #selector(openProfile))
-        left.direction = .left
-        [up, down, left].forEach { remoteView.addGestureRecognizer($0) }
+        let right = UISwipeGestureRecognizer(target: self, action: #selector(openProfile))
+        right.direction = .right
+        [up, down, right].forEach { remoteView.addGestureRecognizer($0) }
 
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(toggleMute))
         remoteView.addGestureRecognizer(longPress)
@@ -83,7 +83,7 @@ final class FeedViewController: UIViewController,
             switch press.type {
             case .upArrow: goPrev()
             case .downArrow: goNext()
-            case .leftArrow: openProfile()
+            case .rightArrow: openProfile()
             case .select, .playPause: togglePlay()
             case .menu:
                 if let presented = presentedViewController {
