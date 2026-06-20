@@ -1,5 +1,6 @@
 import UIKit
 import AVFoundation
+import AVKit
 
 final class VideoCell: UICollectionViewCell {
 
@@ -9,7 +10,7 @@ final class VideoCell: UICollectionViewCell {
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let stage = UIView()          // centered 9:16 video frame
-    private let playerLayer = AVPlayerLayer()
+    private let playerVC = AVPlayerViewController()   // system player owns audio session + routing
     private let gradient = CAGradientLayer()
     private let safeMargin: CGFloat = 20  // minimal top/bottom inset (video as tall as safely possible)
 
@@ -83,11 +84,45 @@ final class VideoCell: UICollectionViewCell {
             stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0),
         ])
 
-        playerLayer.videoGravity = .resizeAspect
-        stage.layer.addSublayer(playerLayer)
+        // Use AVPlayerViewController (the system player) instead of a raw
+        // AVPlayerLayer. It owns audio-session activation + audio-output routing —
+        // what every working tvOS video app relies on. The hand-rolled
+        // AVAudioSession path left a raw AVPlayerLayer rendering video but silent.
+        playerVC.showsPlaybackControls = false          // we draw our own chrome
+        playerVC.videoGravity = .resizeAspect
+        playerVC.view.isUserInteractionEnabled = false  // never steal the remote / focus
+        playerVC.view.backgroundColor = .clear
+        playerVC.view.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(playerVC.view)
+        NSLayoutConstraint.activate([
+            playerVC.view.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            playerVC.view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            playerVC.view.topAnchor.constraint(equalTo: stage.topAnchor),
+            playerVC.view.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+        ])
 
+        // Gradient sits above the video but below the text overlays (added later).
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
         stage.layer.addSublayer(gradient)
+    }
+
+    // Walk the responder chain to the hosting view controller so the player VC
+    // can be parented into the hierarchy (required for it to fully manage playback).
+    private var parentViewController: UIViewController? {
+        var r: UIResponder? = next
+        while let cur = r {
+            if let vc = cur as? UIViewController { return vc }
+            r = cur.next
+        }
+        return nil
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil, playerVC.parent == nil, let host = parentViewController {
+            host.addChild(playerVC)
+            playerVC.didMove(toParent: host)
+        }
     }
 
     private func setupOverlay() {
@@ -175,7 +210,6 @@ final class VideoCell: UICollectionViewCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        playerLayer.frame = stage.bounds
         let g: CGFloat = 360
         gradient.frame = CGRect(x: 0, y: max(0, stage.bounds.height - g),
                                 width: stage.bounds.width, height: g)
@@ -211,7 +245,7 @@ final class VideoCell: UICollectionViewCell {
         p.allowsExternalPlayback = false
         player = p
         Self.livePlayers += 1
-        playerLayer.player = p
+        playerVC.player = p
 
         // Self-heal: if the player drops to paused while it should be running (the
         // real bug behind the silence — tcs:0 = paused, so no audio), nudge it back
@@ -447,7 +481,7 @@ final class VideoCell: UICollectionViewCell {
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
         statusObs?.invalidate(); statusObs = nil
         tcsObs?.invalidate(); tcsObs = nil
-        playerLayer.player = nil
+        playerVC.player = nil
         if player != nil { Self.livePlayers = max(0, Self.livePlayers - 1) }
         player = nil
     }

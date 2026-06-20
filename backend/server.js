@@ -44,10 +44,50 @@ const downloads = new Map(); // id -> Promise<filePath>
 // still has the silent HE-AACv2 track, so those get re-processed automatically.
 const localFileFor = (id) => path.join(os.tmpdir(), `tt-${id}-aac.mp4`);
 
+// ids whose on-disk file we've confirmed this run is NOT silent HE-AACv2, so we
+// don't re-probe on every stream request (probing spawns ffmpeg = not free).
+const verifiedAudio = new Set();
+
+// Probe a file's audio codec via `ffmpeg -i` (stream info goes to stderr).
+// Returns 'he' (HE-AAC/HE-AACv2 → silent on tvOS, must re-transcode), 'lc'
+// (AAC-LC → good), 'none' (no audio track), or 'unknown' (couldn't probe, e.g.
+// no ffmpeg). Only 'he' triggers a rebuild — the rest are served as-is.
+function probeAudio(file) {
+  return new Promise((resolve) => {
+    if (!FFMPEG) return resolve('unknown');
+    const ff = spawn(FFMPEG, ['-hide_banner', '-i', file], { windowsHide: true });
+    let s = '';
+    ff.stderr.on('data', (d) => (s += d));
+    ff.on('error', () => resolve('unknown'));
+    ff.on('close', () => {
+      const m = s.match(/Audio:\s*([^\n,]+)/i);
+      if (!m) return resolve('none');
+      const desc = m[1].toLowerCase();
+      if (desc.includes('he-aac')) return resolve('he');
+      if (desc.includes('aac')) return resolve('lc');
+      resolve('unknown');
+    });
+  });
+}
+
 function ensureLocalFile(id) {
   const out = localFileFor(id);
-  if (fs.existsSync(out) && fs.statSync(out).size > 0) return Promise.resolve(out);
   if (downloads.has(id)) return downloads.get(id);
+  if (fs.existsSync(out) && fs.statSync(out).size > 0) {
+    if (verifiedAudio.has(id)) return Promise.resolve(out);
+    // Validate the cached file's audio ONCE per run: a file left by a previous
+    // run that had no ffmpeg (or an older build) can be silent HE-AACv2. Only
+    // those get deleted and rebuilt; good/unknown files are served immediately.
+    const p = probeAudio(out).then((kind) => {
+      if (kind !== 'he') { verifiedAudio.add(id); return out; }
+      try { fs.unlinkSync(out); } catch {}   // drop the stale silent file
+      downloads.delete(id);
+      return ensureLocalFile(id);            // re-download + transcode
+    });
+    downloads.set(id, p);
+    p.catch(() => {}).finally(() => { if (downloads.get(id) === p) downloads.delete(id); });
+    return p;
+  }
 
   const src = path.join(os.tmpdir(), `tt-${id}.src.mp4`);
   const ok = (f) => fs.existsSync(f) && fs.statSync(f).size > 0;
@@ -93,17 +133,21 @@ function ensureLocalFile(id) {
         downloads.delete(id);
         if (fcode === 0 && ok(out)) {
           try { fs.unlinkSync(src); } catch {}
+          verifiedAudio.add(id);   // freshly transcoded to AAC-LC → known good
           resolve(out);
         } else {
           // Transcode failed — fall back to the original so the clip still plays
-          // (may be silent, but better than nothing).
+          // (may be silent, but better than nothing). Mark verified so we don't
+          // re-download it on every request trying to "fix" an unfixable clip.
           try { fs.renameSync(src, out); } catch {}
+          if (ok(out)) verifiedAudio.add(id);
           ok(out) ? resolve(out) : reject(new Error(`transcode failed (${fcode}): ${ferr.slice(-200)}`));
         }
       });
       ff.on('error', () => {
         downloads.delete(id);
         try { fs.renameSync(src, out); } catch {}
+        if (ok(out)) verifiedAudio.add(id);
         ok(out) ? resolve(out) : reject(new Error('ffmpeg spawn failed'));
       });
     });
