@@ -33,9 +33,6 @@ def _load_note():
     """The note on transparency: trim the rounded-square border, drop the black
     background, then crop to the note's bounding box."""
     im = Image.open(SRC).convert("RGBA")
-    w, h = im.size
-    inset = int(w * 0.10)                 # remove the rounded-square edge highlight
-    im = im.crop((inset, inset, w - inset, h - inset))
     px = im.load()
     cw, ch = im.size
     for y in range(ch):
