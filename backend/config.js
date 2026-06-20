@@ -40,7 +40,10 @@ export const PYTHON = process.env.PYTHON || DEFAULT_PYTHON;
 // Max video width to download. TikTok is vertical, so widths are:
 //   576 = 540p (smallest/fastest)   720 = 720p (balanced)   1080 = 1080p (sharpest)
 // Higher = sharper but bigger/slower to buffer.
-export const MAX_VIDEO_WIDTH = Number(process.env.MAX_VIDEO_WIDTH || 720);
+// Default 576 (540p): clips download/transcode ~2x faster than 720p and look
+// identical inside the small phone-frame on screen. Set MAX_VIDEO_WIDTH=720/1080
+// to trade speed for sharpness.
+export const MAX_VIDEO_WIDTH = Number(process.env.MAX_VIDEO_WIDTH || 576);
 
 // How to invoke yt-dlp. We use the pip module form so no separate binary needed.
 export const YTDLP_CMD = process.env.YTDLP_CMD || DEFAULT_PYTHON;

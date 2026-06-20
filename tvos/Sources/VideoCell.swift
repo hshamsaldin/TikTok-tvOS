@@ -78,7 +78,7 @@ final class VideoCell: UICollectionViewCell {
         ])
 
         playerVC.showsPlaybackControls = false          // we draw our own chrome
-        playerVC.videoGravity = .resizeAspect
+        playerVC.videoGravity = .resizeAspectFill       // fill the frame (TikTok-style), no black bars
         playerVC.view.isUserInteractionEnabled = false  // never steal the remote / focus
         playerVC.view.backgroundColor = .clear
         playerVC.view.translatesAutoresizingMaskIntoConstraints = false
