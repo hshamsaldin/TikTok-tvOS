@@ -236,7 +236,7 @@ final class VideoCell: UICollectionViewCell {
     // AAC, definitely has audio). If THIS has sound on device, our backend file is
     // the problem; if it's silent too, the app's audio path is. Set back to nil after.
     static let audioTestURL: URL? = URL(string:
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4")
+        "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8")
 
     private func openStream(for id: String) {
         let url = Self.audioTestURL ?? Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
