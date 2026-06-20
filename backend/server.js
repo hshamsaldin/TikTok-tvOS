@@ -437,13 +437,48 @@ function cleanupTemp() {
 cleanupTemp();
 setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 
+// How many clips to fully download on startup before declaring "ready".
+const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 10);
+
+// Download a list of ids with limited concurrency, reporting progress.
+async function prewarmClips(ids, concurrency, onProgress) {
+  let next = 0, done = 0;
+  async function worker() {
+    while (next < ids.length) {
+      const id = ids[next++];
+      try { await ensureLocalFile(id); } catch {}
+      onProgress(++done, ids.length);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker));
+}
+
+// Pre-warm on startup: scrape the feed AND download the first clips NOW, so when
+// the app opens everything is ready and the loading screen resolves instantly.
+async function prewarmOnStartup() {
+  const t0 = Date.now();
+  console.log('\n⏳  Pre-warming — scraping For-You feed…');
+  let items;
+  try {
+    items = await buildFeed();
+  } catch (e) {
+    console.warn('⚠️  feed scrape failed (will retry on first request):', String(e).slice(0, 120));
+    return;
+  }
+  const n = Math.min(items.length, PREWARM_COUNT);
+  console.log(`📋  Feed ready: ${items.length} videos. Preloading first ${n} clips…`);
+  await prewarmClips(
+    items.slice(0, n).map((x) => x.id),
+    PREFETCH_CONCURRENCY,
+    (d, total) => process.stdout.write(`\r    downloaded ${d}/${total} clips…   `)
+  );
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`\n✅  READY in ${secs}s — open the app now (${n} videos preloaded).\n`);
+}
+
 server.listen(PORT, () => {
   console.log(
     `tiktok-appletv backend on http://0.0.0.0:${PORT}  (/api/feed)  mode=${FEED_MODE}`
   );
-  // Pre-warm on startup: scrape the feed and download the first clips NOW, so the
-  // app's loading screen resolves instantly instead of waiting for a cold scrape.
-  buildFeed()
-    .then((items) => console.log(`pre-warmed feed: ${items.length} items`))
-    .catch((e) => console.warn('pre-warm failed (will retry on first request):', String(e).slice(0, 120)));
+  prewarmOnStartup();
 });
