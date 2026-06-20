@@ -114,13 +114,8 @@ final class FeedViewController: UIViewController,
     }
 
     private var currentItem: FeedItem? {
-        let i = currentIndex
+        let i = targetIndex ?? currentIndex
         return (i >= 0 && i < items.count) ? items[i] : nil
-    }
-
-    @objc private func openComments() {
-        guard let item = currentItem else { return }
-        present(CommentsViewController(videoID: item.id), animated: true)
     }
 
     @objc private func openProfile() {
@@ -139,13 +134,20 @@ final class FeedViewController: UIViewController,
         return Int((collectionView.contentOffset.y / h).rounded())
     }
 
+    // Track the intended page rather than reading contentOffset (which lags mid-
+    // animation). Without this, a quick double-press during the scroll animation
+    // re-targets the SAME page the first press already started — feels laggy and
+    // unresponsive compared to native tvOS paging, which always honors fast input.
+    private var targetIndex: Int?
+
     private func go(to index: Int) {
         guard index >= 0, index < items.count else { return }
+        targetIndex = index
         collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
     }
 
-    @objc private func goNext() { go(to: currentIndex + 1) }
-    @objc private func goPrev() { go(to: currentIndex - 1) }
+    @objc private func goNext() { go(to: (targetIndex ?? currentIndex) + 1) }
+    @objc private func goPrev() { go(to: (targetIndex ?? currentIndex) - 1) }
     @objc private func togglePlay() { currentCell?.togglePlayPause() }
 
     func takePlayer(for id: String) -> AVPlayer? {
@@ -200,6 +202,9 @@ final class FeedViewController: UIViewController,
     func collectionView(_ cv: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         (cell as? VideoCell)?.pause()
     }
+
+    // Once a scroll settles, fall back to reading the real offset again.
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { targetIndex = nil }
 
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {

@@ -9,10 +9,6 @@ enum API {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    static func comments(_ id: String) async -> [CommentItem] {
-        (try? await get("api/comments/\(id)", timeout: 60) as CommentsResponse)?.comments ?? []
-    }
-
     static func profile(_ username: String) async -> ProfileResponse? {
         try? await get("api/profile/\(username)") as ProfileResponse
     }
@@ -20,4 +16,13 @@ enum API {
     static func userVideos(_ username: String, start: Int) async -> [FeedItem] {
         (try? await get("api/user-videos/\(username)?start=\(start)&count=30") as VideosResponse)?.videos ?? []
     }
+
+    /// Per-clip loudness correction in dB (see backend analyzeGain) — applied
+    /// on-device via AVAudioMix so every clip plays at a consistent level without
+    /// any server-side audio re-encoding.
+    static func audioGain(_ id: String) async -> Double {
+        (try? await get("api/audiogain/\(id)") as AudioGainResponse)?.gain ?? 0
+    }
 }
+
+struct AudioGainResponse: Decodable { let gain: Double }

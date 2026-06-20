@@ -220,6 +220,51 @@ function ensureHls(id) {
   return p;
 }
 
+// ===== Audio loudness gain (native-side normalization) =====
+// TikTok clips vary wildly in loudness. Re-encoding every clip's audio to a fixed
+// level server-side (loudnorm) would mean decode+encode on every clip — real CPU
+// cost on a path we want copy-only and fast. Instead: measure each clip's loudness
+// ONCE with a cheap decode-only analysis pass (no re-encode), cache a single gain
+// number, and let AVFoundation apply it on-device via AVAudioMix — the native
+// AVFoundation mechanism for per-asset volume correction, with zero server re-encode.
+const TARGET_DBFS = -20;           // reference loudness we normalize towards
+const audioGainCache = new Map();  // id -> gain in dB
+const audioGainJobs = new Map();
+
+function analyzeGain(id) {
+  if (audioGainCache.has(id)) return Promise.resolve(audioGainCache.get(id));
+  if (audioGainJobs.has(id)) return audioGainJobs.get(id);
+
+  const p = new Promise((resolve) => {
+    if (!FFMPEG) return resolve(0);
+    const yt = spawn(YTDLP_CMD, [
+      ...YTDLP_ARGS_PREFIX, '-o', '-', '--no-part', '--no-warnings', '--quiet',
+      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/b[vcodec^=h264]/b`,
+      `https://www.tiktok.com/@_/video/${id}`,
+    ], { windowsHide: true });
+    // -vn drops video entirely so this pass is audio-decode-only — cheap.
+    const ff = spawn(FFMPEG, ['-i', 'pipe:0', '-vn', '-af', 'volumedetect', '-f', 'null', '-'],
+      { windowsHide: true });
+    let out = '';
+    ff.stderr.on('data', (d) => { out += d; });
+    yt.stdout.pipe(ff.stdin);
+    yt.on('error', () => {});
+    yt.stderr.resume();
+    yt.on('close', () => { try { ff.stdin.end(); } catch {} });
+    ff.on('error', () => resolve(0));
+    ff.on('close', () => {
+      const m = out.match(/mean_volume:\s*(-?\d+(\.\d+)?)\s*dB/);
+      const mean = m ? parseFloat(m[1]) : null;
+      const gain = mean === null ? 0 : Math.max(-12, Math.min(12, TARGET_DBFS - mean));
+      audioGainCache.set(id, gain);
+      resolve(gain);
+    });
+  });
+  audioGainJobs.set(id, p);
+  p.finally(() => audioGainJobs.delete(id));
+  return p;
+}
+
 // Background prefetch with limited concurrency: warm upcoming clips ahead of time
 // WITHOUT starving the clip being watched (that one is fetched on-demand, ungated).
 const PREFETCH_CONCURRENCY = 2;
@@ -227,6 +272,7 @@ let prefetchActive = 0;
 const prefetchQueue = [];
 
 function queuePrefetch(id) {
+  analyzeGain(id).catch(() => {});   // measure loudness in the background too
   if (hlsReady(id) || hlsJobs.has(id) || prefetchQueue.includes(id)) return;
   prefetchQueue.push(id);
   drainPrefetch();
@@ -462,8 +508,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { comments });
     }
 
-    // Stream proxy: the Apple TV plays this. yt-dlp downloads the clip, then we
-    // serve it with HTTP Range support so AVPlayer can stream/seek smoothly.
+    // Loudness gain for AVAudioMix (analysis-only, no re-encode — see analyzeGain).
+    if (url.pathname.startsWith('/api/audiogain/')) {
+      const id = url.pathname.split('/').pop().replace(/[^\w-]/g, '');
+      const gain = await analyzeGain(id);
+      return send(res, 200, { gain });
+    }
+
     // HLS streaming: AVPlayer plays this. index.m3u8 starts (or reuses) the
     // pipe→ffmpeg→HLS job and serves the playlist; sN.ts serves each segment as
     // it's produced. First frame in ~2s — no full-download wait.

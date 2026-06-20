@@ -24,16 +24,6 @@ struct FeedItem: Decodable {
     var handle: String { author ?? "" }
 }
 
-struct CommentsResponse: Decodable { let comments: [CommentItem] }
-
-struct CommentItem: Decodable {
-    let author: String?
-    let nickname: String?
-    let avatar: String?
-    let text: String?
-    let likes: Int?
-}
-
 struct ProfileResponse: Decodable {
     let user: ProfileUser?
     let videos: [FeedItem]

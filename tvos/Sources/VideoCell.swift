@@ -240,6 +240,7 @@ final class VideoCell: UICollectionViewCell {
         player = p
         playerVC.player = p
         loadingSpinner.startAnimating()
+        applyAudioGain(to: playerItem, id: id)
 
         updateStageAspect(CGSize(width: 9, height: 16))
         presSizeObs = playerItem.observe(\.presentationSize, options: [.new]) { [weak self] item, _ in
@@ -378,6 +379,23 @@ final class VideoCell: UICollectionViewCell {
             icon.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
         ])
         return stack
+    }
+
+    /// Levels out TikTok's wildly inconsistent per-clip loudness using AVFoundation's
+    /// native AVAudioMix — a per-asset volume correction applied on-device, computed
+    /// once server-side by analysis only (no server re-encode, so streaming stays fast).
+    private func applyAudioGain(to item: AVPlayerItem, id: String) {
+        Task { [weak self] in
+            let gainDb = await API.audioGain(id)
+            guard let self, self.currentID == id, gainDb != 0 else { return }
+            let asset = item.asset
+            guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return }
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.setVolume(Float(pow(10, gainDb / 20)), at: .zero)
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = mix
+        }
     }
 
     func play() {

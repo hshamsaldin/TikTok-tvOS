@@ -23,6 +23,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let verifiedBadge = UIImageView()
     private let backChip = UIStackView()
     private var headerView: UIView!
+    private let headerBg = UIView()   // opaque backdrop so the grid scrolls UNDER the header, not over it
 
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
@@ -50,6 +51,17 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         let header = setupHeader()
         headerView = header
         setupGrid(below: header)
+
+        headerBg.backgroundColor = .black
+        headerBg.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(headerBg)
+        NSLayoutConstraint.activate([
+            headerBg.topAnchor.constraint(equalTo: view.topAnchor),
+            headerBg.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerBg.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            headerBg.bottomAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 14),
+        ])
+        [header, videosTitle, backChip].forEach { view.bringSubviewToFront($0) }
 
         spinner.color = .white
         spinner.hidesWhenStopped = true
@@ -364,6 +376,16 @@ final class GridCell: UICollectionViewCell {
     func configure(_ v: FeedItem) {
         cover.setImage(v.cover)
         plays.text = "▶ \(Format.count(v.plays))"
+    }
+
+    // Reused cells must not inherit the previous item's focus transform/shadow/
+    // border — without this reset, a recycled cell can show a stale "focused"
+    // look (scaled, shadowed, bordered) on a different video after scrolling.
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        transform = .identity
+        layer.shadowOpacity = 0
+        contentView.layer.borderWidth = 0
     }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
