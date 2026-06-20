@@ -122,16 +122,16 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func setupOverlay() {
-        authorLabel.font = .systemFont(ofSize: 30, weight: .bold)
+        authorLabel.font = .app(ofSize: 30, weight: .bold)
         authorLabel.textColor = .white
-        captionLabel.font = .systemFont(ofSize: 24)
+        captionLabel.font = .app(ofSize: 24)
         captionLabel.textColor = .white
         captionLabel.numberOfLines = 2
 
         let noteIcon = UIImageView(image: UIImage(systemName: "music.note"))
         noteIcon.tintColor = .white
         noteIcon.setContentHuggingPriority(.required, for: .horizontal)
-        soundLabel.font = .systemFont(ofSize: 22)
+        soundLabel.font = .app(ofSize: 22)
         soundLabel.textColor = .white
         soundRow.axis = .horizontal
         soundRow.spacing = 8
@@ -293,7 +293,7 @@ final class VideoCell: UICollectionViewCell {
         let plus = UILabel()
         plus.text = "+"
         plus.textColor = .white
-        plus.font = .systemFont(ofSize: 20, weight: .bold)
+        plus.font = .app(ofSize: 20, weight: .bold)
         plus.textAlignment = .center
         plus.backgroundColor = UIColor(red: 0.996, green: 0.173, blue: 0.333, alpha: 1)
         plus.layer.cornerRadius = 13
@@ -348,7 +348,7 @@ final class VideoCell: UICollectionViewCell {
         let label = UILabel()
         label.text = Format.count(count)
         label.textColor = .white
-        label.font = .systemFont(ofSize: 20, weight: .semibold)
+        label.font = .app(ofSize: 20, weight: .semibold)
         let stack = UIStackView(arrangedSubviews: [chip, label])
         stack.axis = .vertical
         stack.spacing = 6

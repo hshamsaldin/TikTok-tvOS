@@ -99,11 +99,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         avatar.layer.borderWidth = 3
         avatar.layer.borderColor = UIColor(white: 1, alpha: 0.85).cgColor
 
-        nameLabel.font = .systemFont(ofSize: 42, weight: .bold)
+        nameLabel.font = .app(ofSize: 42, weight: .bold)
         nameLabel.textColor = .white
-        handleLabel.font = .systemFont(ofSize: 26, weight: .medium)
+        handleLabel.font = .app(ofSize: 26, weight: .medium)
         handleLabel.textColor = UIColor(white: 1, alpha: 0.65)
-        bioLabel.font = .systemFont(ofSize: 21)
+        bioLabel.font = .app(ofSize: 21)
         bioLabel.textColor = UIColor(white: 1, alpha: 0.85)
         bioLabel.numberOfLines = 2
 
@@ -121,7 +121,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         let divider = UILabel()
         divider.text = "|"
-        divider.font = .systemFont(ofSize: 24)
+        divider.font = .app(ofSize: 24)
         divider.textColor = UIColor(white: 1, alpha: 0.35)
 
         // name · @username · verified, inline on one row
@@ -157,7 +157,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
     private func setupGrid(below header: UIView) {
         videosTitle.text = "Videos"
-        videosTitle.font = .systemFont(ofSize: 30, weight: .semibold)
+        videosTitle.font = .app(ofSize: 30, weight: .semibold)
         videosTitle.textColor = .white
         videosTitle.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(videosTitle)
@@ -207,7 +207,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         icon.tintColor = .white
         let label = UILabel()
         label.text = "Back"
-        label.font = .systemFont(ofSize: 22, weight: .semibold)
+        label.font = .app(ofSize: 22, weight: .semibold)
         label.textColor = .white
         backChip.addArrangedSubview(icon)
         backChip.addArrangedSubview(label)
@@ -318,9 +318,9 @@ final class StatView: UIView {
     private let caption = UILabel()
     override init(frame: CGRect) {
         super.init(frame: frame)
-        value.font = .systemFont(ofSize: 30, weight: .bold)
+        value.font = .app(ofSize: 30, weight: .bold)
         value.textColor = .white
-        caption.font = .systemFont(ofSize: 18, weight: .medium)
+        caption.font = .app(ofSize: 18, weight: .medium)
         caption.textColor = UIColor(white: 1, alpha: 0.6)
         let s = UIStackView(arrangedSubviews: [value, caption])
         s.axis = .vertical
@@ -360,7 +360,7 @@ final class GridCell: UICollectionViewCell {
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
         contentView.layer.addSublayer(gradient)
 
-        plays.font = .systemFont(ofSize: 18, weight: .bold)
+        plays.font = .app(ofSize: 18, weight: .bold)
         plays.textColor = .white
         plays.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(plays)

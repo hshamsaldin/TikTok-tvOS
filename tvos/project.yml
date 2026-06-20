@@ -10,6 +10,7 @@ targets:
     sources:
       - Sources
       - Resources/Assets.xcassets
+      - Resources/Fonts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.hshamsaldin.tiktoktvOS

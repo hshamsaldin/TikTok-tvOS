@@ -1,15 +1,20 @@
-"""Generate an original tvOS Brand Assets icon set (no third-party logos).
-Run once: python generate_icons.py  -> creates Resources/Assets.xcassets
+"""Generate the tvOS Brand Assets icon set from the real TikTok note.
 
-tvOS app-icon imagestacks need >= 2 layers, so each icon stack has a Back
-(gradient) layer and a Front (white play mark, transparent) layer.
+Reads Resources/tiktok-icon-src.png (the square TikTok app icon), extracts the
+note onto transparency, and composites it centered on black for the wide tvOS
+icon frames. tvOS imagestacks need >= 2 layers, so each stack has a black Back
+layer + the note on a transparent Front layer (gives the parallax depth).
+
+Run: python generate_icons.py
 """
 import json
 import os
-from PIL import Image, ImageDraw
+from PIL import Image
 
-BASE = os.path.join(os.path.dirname(__file__), "Resources", "Assets.xcassets")
+HERE = os.path.dirname(__file__)
+BASE = os.path.join(HERE, "Resources", "Assets.xcassets")
 BRAND = os.path.join(BASE, "App Icon & Top Shelf Image.brandassets")
+SRC = os.path.join(HERE, "Resources", "tiktok-icon-src.png")
 INFO = {"author": "xcode", "version": 1}
 
 
@@ -24,52 +29,49 @@ def _save(img, path):
     img.save(path)
 
 
-def make_bg(w, h, path):  # opaque dark gradient
-    img = Image.new("RGB", (w, h))
-    d = ImageDraw.Draw(img)
-    for y in range(h):
-        t = y / max(h - 1, 1)
-        d.line([(0, y), (w, y)], fill=(int(22 - 14 * t), int(22 - 14 * t), int(26 - 16 * t)))
-    _save(img, path)
+def _load_note():
+    """The note on transparency: trim the rounded-square border, drop the black
+    background, then crop to the note's bounding box."""
+    im = Image.open(SRC).convert("RGBA")
+    w, h = im.size
+    inset = int(w * 0.10)                 # remove the rounded-square edge highlight
+    im = im.crop((inset, inset, w - inset, h - inset))
+    px = im.load()
+    cw, ch = im.size
+    for y in range(ch):
+        for x in range(cw):
+            r, g, b, _ = px[x, y]
+            if max(r, g, b) < 50:         # black background → transparent
+                px[x, y] = (0, 0, 0, 0)
+    bbox = im.getbbox()
+    return im.crop(bbox) if bbox else im
 
 
-def _note(d, w, h, color, dx=0):  # a TikTok-style eighth note
-    s = min(w, h)
-    stem_w = s * 0.085
-    stem_x = w / 2 + dx + s * 0.02
-    top = h / 2 - s * 0.30
-    bot = h / 2 + s * 0.20
-    d.rounded_rectangle([stem_x, top, stem_x + stem_w, bot], radius=stem_w / 2, fill=color)
-    # note head, bottom-left of the stem
-    hw, hh = s * 0.26, s * 0.20
-    hx = stem_x - hw * 0.72
-    d.ellipse([hx, bot - hh, hx + hw, bot], fill=color)
-    # flag hooking off the top of the stem
-    d.polygon([(stem_x + stem_w, top),
-               (stem_x + stem_w + s * 0.19, top + s * 0.06),
-               (stem_x + stem_w + s * 0.15, top + s * 0.21),
-               (stem_x + stem_w, top + s * 0.13)], fill=color)
+NOTE = _load_note()
 
 
-def _chromatic(d, w, h, alpha):  # cyan + red offset + white note (the TikTok look)
-    off = min(w, h) * 0.03
-    a = (alpha,) if alpha is not None else ()
-    _note(d, w, h, (37, 244, 238) + a, dx=-off)
-    _note(d, w, h, (254, 44, 85) + a, dx=off)
-    _note(d, w, h, (255, 255, 255) + a, dx=0)
+def _paste_note(canvas, scale):
+    cw, ch = canvas.size
+    th = int(ch * scale)
+    tw = int(NOTE.width * th / NOTE.height)
+    note = NOTE.resize((tw, th), Image.LANCZOS)
+    canvas.alpha_composite(note, ((cw - tw) // 2, (ch - th) // 2))
 
 
-def make_front(w, h, path):  # transparent + chromatic note (icon Front layer)
+def make_bg(w, h, path):                 # solid black (system rounds the corners)
+    _save(Image.new("RGBA", (w, h), (0, 0, 0, 255)), path)
+
+
+def make_front(w, h, path):              # note on transparency (icon Front layer)
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    _chromatic(ImageDraw.Draw(img), w, h, 255)
+    _paste_note(img, 0.82)
     _save(img, path)
 
 
-def make_flat(w, h, path):  # dark bg + chromatic note (top-shelf imagesets)
-    make_bg(w, h, path)
-    img = Image.open(path).convert("RGB")
-    _chromatic(ImageDraw.Draw(img), w, h, None)
-    _save(img, path)
+def make_flat(w, h, path):               # black + note (top-shelf imagesets)
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 255))
+    _paste_note(img, 0.70)
+    _save(img.convert("RGB"), path)
 
 
 def imagestack(name, sizes):

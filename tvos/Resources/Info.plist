@@ -36,5 +36,13 @@
   <array>
     <string>audio</string>
   </array>
+  <!-- Bundled Inter font (open source, SIL OFL). -->
+  <key>UIAppFonts</key>
+  <array>
+    <string>Inter-Regular.ttf</string>
+    <string>Inter-Medium.ttf</string>
+    <string>Inter-SemiBold.ttf</string>
+    <string>Inter-Bold.ttf</string>
+  </array>
 </dict>
 </plist>

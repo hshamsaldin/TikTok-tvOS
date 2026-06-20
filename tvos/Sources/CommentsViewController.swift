@@ -25,7 +25,7 @@ final class CommentsViewController: UIViewController, UITableViewDataSource {
         view.addSubview(panel)
 
         titleLabel.text = "Comments"
-        titleLabel.font = .systemFont(ofSize: 28, weight: .bold)
+        titleLabel.font = .app(ofSize: 28, weight: .bold)
         titleLabel.textColor = .white
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         panel.addSubview(titleLabel)
@@ -100,12 +100,12 @@ final class CommentCell: UITableViewCell {
         avatar.backgroundColor = UIColor(white: 0.25, alpha: 1)
         avatar.contentMode = .scaleAspectFill
 
-        author.font = .systemFont(ofSize: 18, weight: .semibold)
+        author.font = .app(ofSize: 18, weight: .semibold)
         author.textColor = UIColor(white: 1, alpha: 0.7)
-        body.font = .systemFont(ofSize: 21)
+        body.font = .app(ofSize: 21)
         body.textColor = .white
         body.numberOfLines = 0
-        meta.font = .systemFont(ofSize: 15)
+        meta.font = .app(ofSize: 15)
         meta.textColor = UIColor(white: 1, alpha: 0.5)
 
         let col = UIStackView(arrangedSubviews: [author, body, meta])

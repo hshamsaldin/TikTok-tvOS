@@ -63,7 +63,7 @@ struct LoadingView: View {
                 }
                 .font(.system(size: 70, weight: .bold))
                 Text("TikTok")
-                    .font(.system(size: 70, weight: .heavy))
+                    .font(.app(70, .bold))
                     .foregroundStyle(.white)
             }
             ProgressView().tint(.white).scaleEffect(1.5)
