@@ -8,10 +8,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var user: ProfileUser?
     private var loadingMore = false
 
-    private let backdrop = AsyncImageView()
-    private let backdropBlur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let dim = UIView()
-
     private let avatar = AsyncImageView()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
@@ -255,7 +251,13 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         // Cap the poster height so one full row fits in the grid's visible area,
         // leaving headroom for the 1.1x focus scale → no top/bottom clipping.
         let ideal = w * 16.0 / 9.0
-        let maxH  = (height - cv.contentInset.top - cv.contentInset.bottom) / 1.06
+
+        // Cap so ~1.4 rows fit in the viewport: one full row plus a visible peek of
+        // the next, signaling there's more to scroll — not the whole viewport
+        // height stretched onto a single row (which squashed cards away from a
+        // real 9:16 cover ratio and caused letterboxing).
+        let available = height - cv.contentInset.top - cv.contentInset.bottom
+        let maxH = (available - gridSpacing) / 1.4
         return CGSize(width: w, height: min(ideal, maxH))
     }
 
@@ -342,7 +344,7 @@ final class GridCell: UICollectionViewCell {
         contentView.clipsToBounds = true
         contentView.backgroundColor = UIColor(white: 0.10, alpha: 1)
 
-        cover.contentMode = .scaleAspectFit
+        cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
