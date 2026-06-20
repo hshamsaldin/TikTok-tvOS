@@ -4,7 +4,6 @@ struct Feed: Decodable {
     let items: [FeedItem]
 }
 
-/// One feed video. Extra fields the server may or may not send are optional.
 struct FeedItem: Decodable {
     let id: String
     let author: String?
@@ -25,8 +24,6 @@ struct FeedItem: Decodable {
     var handle: String { author ?? "" }
 }
 
-// MARK: - Comments
-
 struct CommentsResponse: Decodable { let comments: [CommentItem] }
 
 struct CommentItem: Decodable {
@@ -36,8 +33,6 @@ struct CommentItem: Decodable {
     let text: String?
     let likes: Int?
 }
-
-// MARK: - Profile
 
 struct ProfileResponse: Decodable {
     let user: ProfileUser?

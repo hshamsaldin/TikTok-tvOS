@@ -4,9 +4,7 @@ import AVFoundation
 @main
 struct TikTokTVApp: App {
     init() {
-        // .longFormAudio route-sharing policy so audio routes to the AirPlay-2 output
-        // the user selected (e.g. a Sonos), not just the local HDMI route. The session
-        // is activated once at the first play (VideoCell.activateAudioSessionOnce).
+
         try? AVAudioSession.sharedInstance()
             .setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
     }
@@ -47,8 +45,6 @@ struct ContentView: View {
     }
 }
 
-/// TikTok-branded splash shown while the first feed loads: a chromatic music note
-/// + "TikTok" wordmark + spinner, matching the web preview's loader.
 struct LoadingView: View {
     private let cyan = Color(red: 0.145, green: 0.957, blue: 0.933)
     private let red = Color(red: 0.996, green: 0.173, blue: 0.333)

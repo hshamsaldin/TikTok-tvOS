@@ -2,8 +2,6 @@ import UIKit
 
 private let imageCache = NSCache<NSURL, UIImage>()
 
-/// UIImageView that loads a remote image (avatar / cover), with caching and
-/// safe reuse (ignores a late response if the view was reassigned a new URL).
 final class AsyncImageView: UIImageView {
     private var currentURL: String?
 

@@ -1,9 +1,5 @@
 import UIKit
 
-/// Channel profile, styled for the TV's landscape screen (like TikTok's desktop
-/// profile): a cinematic blurred backdrop, an avatar + name + stats header on the
-/// left, and a grid of rounded poster cards below. Select a poster to play that
-/// channel's videos. The Menu/Back button closes it.
 final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     UICollectionViewDelegate, UICollectionViewDelegateFlowLayout {
 
@@ -12,12 +8,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var user: ProfileUser?
     private var loadingMore = false
 
-    // Cinematic backdrop (blurred avatar) so the screen is never flat grey/black.
     private let backdrop = AsyncImageView()
     private let backdropBlur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let dim = UIView()
 
-    // Header
     private let avatar = AsyncImageView()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
@@ -34,7 +28,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let spinner = UIActivityIndicatorView(style: .large)
 
     private let gridColumns: CGFloat = 4
-    private let gridSpacing: CGFloat = 30     // room for the focus scale, no overlap
+    private let gridSpacing: CGFloat = 30
     private let sideInset: CGFloat = 110
     private var lastGridWidth: CGFloat = 0
 
@@ -50,8 +44,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         view.backgroundColor = .black
 
         setupBackdrop()
-        setupBackHint()                 // build the Back chip first…
-        let header = setupHeader()      // …so the header can sit below it
+        setupBackHint()
+        let header = setupHeader()
         headerView = header
         setupGrid(below: header)
 
@@ -64,17 +58,13 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
 
-        // Hide the header + grid until the data arrives, so we don't show an empty
-        // avatar/“Videos” skeleton. Only the Back chip + spinner show while loading.
         [headerView, videosTitle, grid].forEach { $0?.alpha = 0 }
 
         load()
     }
 
-    // MARK: setup
-
     private func setupBackdrop() {
-        view.backgroundColor = .black   // plain black, like the icon background
+        view.backgroundColor = .black
     }
 
     private func setupHeader() -> UIView {
@@ -111,7 +101,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         divider.font = .app(ofSize: 24)
         divider.textColor = UIColor(white: 1, alpha: 0.35)
 
-        // name · @username · verified, inline on one row
         let titleRow = UIStackView(arrangedSubviews: [nameLabel, divider, handleLabel, verifiedBadge])
         titleRow.axis = .horizontal
         titleRow.spacing = 12
@@ -134,7 +123,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         NSLayoutConstraint.activate([
             avatar.widthAnchor.constraint(equalToConstant: 160),
             avatar.heightAnchor.constraint(equalToConstant: 160),
-            // Sit below the Back chip so they never overlap in the top-left corner.
+
             header.topAnchor.constraint(equalTo: backChip.bottomAnchor, constant: 6),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
             header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -sideInset),
@@ -149,7 +138,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         videosTitle.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(videosTitle)
 
-        // Vertical grid of poster cards — scroll DOWN for more.
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
         layout.minimumInteritemSpacing = gridSpacing
@@ -162,7 +150,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.delegate = self
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        // Top pad so the focus-scaled first row isn't clipped; side margins match header.
+
         grid.contentInset = UIEdgeInsets(top: 20, left: sideInset, bottom: 40, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
@@ -177,8 +165,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         ])
     }
 
-    /// Subtle, native-looking back affordance top-left. Navigation itself is the
-    /// remote's Menu/Back button (tvOS convention), this just signals it.
     private func setupBackHint() {
         backChip.axis = .horizontal
         backChip.spacing = 10
@@ -205,8 +191,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         ])
     }
 
-    // MARK: data
-
     private func load() {
         spinner.startAnimating()
         Task { @MainActor in
@@ -217,7 +201,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             videos = data.videos
             applyHeader()
             grid.reloadData()
-            // Reveal the now-populated header + grid together.
+
             UIView.animate(withDuration: 0.25) {
                 [self.headerView, self.videosTitle, self.grid].forEach { $0?.alpha = 1 }
             }
@@ -236,7 +220,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         bioLabel.isHidden = (user?.signature?.isEmpty != false)
     }
 
-    // Re-query item size once the grid's real width settles.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         if grid.bounds.width != lastGridWidth {
@@ -245,7 +228,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
-    // Fixed columns of 9:16 posters (match TikTok covers → fill with no cropping).
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
         let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
@@ -300,7 +282,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     }
 }
 
-/// One stat column: big number over a small caption (TikTok-style).
 final class StatView: UIView {
     private let value = UILabel()
     private let caption = UILabel()
@@ -327,7 +308,6 @@ final class StatView: UIView {
     func set(_ v: String, _ c: String) { value.text = v; caption.text = c }
 }
 
-/// Rounded poster card with a play-count overlay; lifts and shadows on focus.
 final class GridCell: UICollectionViewCell {
     private let cover = AsyncImageView()
     private let gradient = CAGradientLayer()
@@ -339,7 +319,7 @@ final class GridCell: UICollectionViewCell {
         contentView.clipsToBounds = true
         contentView.backgroundColor = UIColor(white: 0.10, alpha: 1)
 
-        cover.contentMode = .scaleAspectFit   // whole cover inside the fixed frame, no crop
+        cover.contentMode = .scaleAspectFit
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -357,7 +337,6 @@ final class GridCell: UICollectionViewCell {
             plays.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
         ])
 
-        // Shadow lives on the (unclipped) cell layer so it shows when focused.
         layer.shadowColor = UIColor.black.cgColor
         layer.shadowOffset = CGSize(width: 0, height: 12)
         layer.shadowRadius = 20

@@ -2,21 +2,18 @@ import UIKit
 import AVFoundation
 import AVKit
 
-/// One full-screen video in the vertical feed: a blurred cover fills the screen,
-/// a centered 9:16 "stage" holds the system player (AVPlayerViewController, which
-/// owns audio-session + AirPlay routing), and the TikTok-style overlay sits on top.
 final class VideoCell: UICollectionViewCell {
 
-    var onEnded: (() -> Void)?            // clip finished → advance the feed
-    var providePlayer: ((String) -> AVPlayer?)?   // pre-buffered player from the feed pool
+    var onEnded: (() -> Void)?
+    var providePlayer: ((String) -> AVPlayer?)?
 
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let stage = UIView()          // centered 9:16 video frame
+    private let stage = UIView()
     private let playerVC = AVPlayerViewController()
     private let gradient = CAGradientLayer()
     private let safeMargin: CGFloat = 20
-    private let railReserve: CGFloat = 220   // keep room on the right for the action rail
+    private let railReserve: CGFloat = 220
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -26,12 +23,11 @@ final class VideoCell: UICollectionViewCell {
     private var presSizeObs: NSKeyValueObservation?
     private var stageAspect: NSLayoutConstraint!
     private var currentID: String?
-    private var appMuted = false          // user's desired mute state
-    private var isActive = false          // true only while this is the on-screen cell
-    private var userPaused = false        // true only when the user deliberately paused
-    private var retried = false           // allow one stream retry on failure
+    private var appMuted = false
+    private var isActive = false
+    private var userPaused = false
+    private var retried = false
 
-    // overlay
     private let authorLabel = UILabel()
     private let captionLabel = UILabel()
     private let soundRow = UIStackView()
@@ -54,8 +50,6 @@ final class VideoCell: UICollectionViewCell {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
     deinit { NotificationCenter.default.removeObserver(self) }
-
-    // MARK: setup
 
     private func setupBackground() {
         bgImage.contentMode = .scaleAspectFill
@@ -85,9 +79,9 @@ final class VideoCell: UICollectionViewCell {
             grow, stageAspect,
         ])
 
-        playerVC.showsPlaybackControls = false          // we draw our own chrome
-        playerVC.videoGravity = .resizeAspectFill       // fill the frame (TikTok-style), no black bars
-        playerVC.view.isUserInteractionEnabled = false  // never steal the remote / focus
+        playerVC.showsPlaybackControls = false
+        playerVC.videoGravity = .resizeAspectFill
+        playerVC.view.isUserInteractionEnabled = false
         playerVC.view.backgroundColor = .clear
         playerVC.view.translatesAutoresizingMaskIntoConstraints = false
         stage.addSubview(playerVC.view)
@@ -111,7 +105,6 @@ final class VideoCell: UICollectionViewCell {
         ])
     }
 
-    // Resize the frame to the video's real aspect ratio (width:height).
     private func updateStageAspect(_ size: CGSize) {
         guard size.width > 0, size.height > 0, stageAspect != nil else { return }
         let aspect = size.width / size.height
@@ -122,7 +115,6 @@ final class VideoCell: UICollectionViewCell {
         UIView.animate(withDuration: 0.2) { self.contentView.layoutIfNeeded() }
     }
 
-    // Parent the player VC into the hosting controller so it fully manages playback.
     private var parentViewController: UIViewController? {
         var r: UIResponder? = next
         while let cur = r {
@@ -176,7 +168,7 @@ final class VideoCell: UICollectionViewCell {
         progressFill.backgroundColor = .white
         progressFill.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressFill)
-        stage.addSubview(progressTrack)   // inside the rounded frame so ends are clipped
+        stage.addSubview(progressTrack)
 
         muteIcon.image = UIImage(systemName: "speaker.slash.fill",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .semibold))
@@ -215,8 +207,6 @@ final class VideoCell: UICollectionViewCell {
                                 width: stage.bounds.width, height: g)
     }
 
-    // MARK: configure
-
     func configure(with item: FeedItem) {
         bgImage.setImage(item.cover)
         authorLabel.text = item.displayName
@@ -233,8 +223,7 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func openStream(for id: String) {
-        // Use a pre-buffered player from the feed's pool if one's ready (instant);
-        // otherwise create a fresh one.
+
         let p: AVPlayer
         let playerItem: AVPlayerItem
         if let pooled = providePlayer?(id), let item = pooled.currentItem {
@@ -252,15 +241,11 @@ final class VideoCell: UICollectionViewCell {
         playerVC.player = p
         loadingSpinner.startAnimating()
 
-        // Reset the frame to 9:16 for the new clip, then snap it to the real video
-        // shape once known so the video fills the frame with no black bars.
         updateStageAspect(CGSize(width: 9, height: 16))
         presSizeObs = playerItem.observe(\.presentationSize, options: [.new]) { [weak self] item, _ in
             self?.updateStageAspect(item.presentationSize)
         }
 
-        // Stop the spinner once it's truly rolling; gently resume if it ever drops
-        // to paused mid-clip while it should be playing (transient interruptions).
         tcsObs = p.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             guard let self else { return }
             if player.timeControlStatus == .playing { self.loadingSpinner.stopAnimating() }
@@ -278,8 +263,7 @@ final class VideoCell: UICollectionViewCell {
             case .readyToPlay:
                 if self.isActive, !self.userPaused { self.player?.play() }
             case .failed:
-                // The clip may still be downloading/transcoding — retry once before
-                // skipping, so a transient backend delay doesn't drop the video.
+
                 if let id = self.currentID, !self.retried {
                     self.retried = true
                     self.teardownPlayer()
@@ -396,8 +380,6 @@ final class VideoCell: UICollectionViewCell {
         return stack
     }
 
-    // MARK: playback control
-
     func play() {
         guard let player else { return }
         isActive = true
@@ -428,12 +410,8 @@ final class VideoCell: UICollectionViewCell {
         else { userPaused = false; player.play() }
     }
 
-    override var canBecomeFocused: Bool { false }   // the feed drives navigation
+    override var canBecomeFocused: Bool { false }
 
-    /// Activate the shared audio session once, before the first play. `.longFormAudio`
-    /// routes audio to the user's chosen output incl. AirPlay-2 speakers (e.g. Sonos);
-    /// `.playback` is the fallback. Done once to avoid per-cell churn that interrupts
-    /// (and pauses) an already-playing clip.
     private static var audioSessionActivated = false
     private static func activateAudioSessionOnce() {
         guard !audioSessionActivated else { return }
@@ -448,7 +426,6 @@ final class VideoCell: UICollectionViewCell {
         audioSessionActivated = true
     }
 
-    // AVPlayer pauses when the audio session is interrupted; resume when it ends.
     @objc private func audioInterrupted(_ note: Notification) {
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,

@@ -1,12 +1,11 @@
 import UIKit
 
-/// Read-only comments shown in a right-side panel. Menu closes it.
 final class CommentsViewController: UIViewController, UITableViewDataSource {
     private let videoID: String
     private var comments: [CommentItem] = []
     private let table = UITableView()
     private let titleLabel = UILabel()
-    private let panel = RemoteInputView()   // focusable so Back works even when empty
+    private let panel = RemoteInputView()
 
     init(videoID: String) {
         self.videoID = videoID

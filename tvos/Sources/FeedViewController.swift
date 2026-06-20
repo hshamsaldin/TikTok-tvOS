@@ -12,7 +12,7 @@ final class FeedViewController: UIViewController,
     private let poolMax = 5
 
     private var collectionView: UICollectionView!
-    private let remoteView = RemoteInputView()   // focusable layer that captures the remote
+    private let remoteView = RemoteInputView()
     private weak var currentCell: VideoCell?
     private var isLoadingMore = false
     private var muted = false
@@ -28,10 +28,7 @@ final class FeedViewController: UIViewController,
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     func update(items: [FeedItem]) {
-        // Appends are handled by maybeLoadMore (insertItems), which keeps the
-        // playing cell alive. Calling reloadData here on every SwiftUI re-render
-        // tore down the active AVPlayer and left it PAUSED — the real cause of the
-        // stuck/silent video. So only seed items before the collection view exists.
+
         if collectionView == nil { self.items = items }
     }
 
@@ -46,21 +43,17 @@ final class FeedViewController: UIViewController,
 
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        // (tvOS has no isPagingEnabled; we page programmatically via scrollToItem)
-        // tvOS auto-insets scroll content for overscan — that shifts the video
-        // off-center and breaks paging. Turn it off so cells fill exactly.
+
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.backgroundColor = .black
         collectionView.showsVerticalScrollIndicator = false
-        // Prefetch upcoming cells so their players are ready → smoother scrolling.
+
         collectionView.isPrefetchingEnabled = true
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(VideoCell.self, forCellWithReuseIdentifier: Self.cellID)
         view.addSubview(collectionView)
 
-        // Transparent focusable overlay on top — without something focusable,
-        // tvOS doesn't route the remote's swipes/clicks to our recognizers.
         remoteView.frame = view.bounds
         remoteView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         remoteView.backgroundColor = .clear
@@ -94,9 +87,9 @@ final class FeedViewController: UIViewController,
             case .select, .playPause: togglePlay()
             case .menu:
                 if let presented = presentedViewController {
-                    presented.dismiss(animated: true)   // close comments/profile
+                    presented.dismiss(animated: true)
                 } else {
-                    handled = false                     // at root → let tvOS go Home
+                    handled = false
                 }
             default: handled = false
             }
@@ -112,7 +105,6 @@ final class FeedViewController: UIViewController,
         }
     }
 
-    // Pause when covered (e.g. profile pushed on top); resume when back.
     override func viewWillDisappear(_ animated: Bool) { super.viewWillDisappear(animated); currentCell?.pause() }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -156,8 +148,6 @@ final class FeedViewController: UIViewController,
     @objc private func goPrev() { go(to: currentIndex - 1) }
     @objc private func togglePlay() { currentCell?.togglePlayPause() }
 
-    // MARK: preload pool
-
     func takePlayer(for id: String) -> AVPlayer? {
         guard let p = pool[id] else { return nil }
         pool[id] = nil
@@ -185,8 +175,6 @@ final class FeedViewController: UIViewController,
             preload(items[i].id)
         }
     }
-
-    // MARK: data source
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         items.count
@@ -218,8 +206,6 @@ final class FeedViewController: UIViewController,
         cv.bounds.size
     }
 
-    // MARK: infinite scroll
-
     private func maybeLoadMore(_ index: Int) {
         guard !isLoadingMore, let loadMore, index >= items.count - 5 else { return }
         isLoadingMore = true
@@ -236,7 +222,6 @@ final class FeedViewController: UIViewController,
     }
 }
 
-/// Transparent, focusable overlay so tvOS routes the Siri Remote to the feed.
 final class RemoteInputView: UIView {
     override var canBecomeFocused: Bool { true }
 }

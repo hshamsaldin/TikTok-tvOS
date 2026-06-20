@@ -1,6 +1,5 @@
 import Foundation
 
-/// Thin JSON client for the backend. Used by the feed, comments and profile.
 enum API {
     static func get<T: Decodable>(_ path: String, timeout: TimeInterval = 90) async throws -> T {
         let url = Config.backendBaseURL.appendingPathComponent(path)

@@ -1,7 +1,7 @@
 import Foundation
 
 enum Format {
-    /// 703200 -> "703.2K", 9300000 -> "9.3M"
+
     static func count(_ value: Int?) -> String {
         let n = value ?? 0
         if n >= 1_000_000 {

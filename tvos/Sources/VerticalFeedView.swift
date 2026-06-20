@@ -1,6 +1,5 @@
 import SwiftUI
 
-/// Bridges the UIKit feed controller into SwiftUI.
 struct VerticalFeedView: UIViewControllerRepresentable {
     let items: [FeedItem]
     var loadMore: (() async -> [FeedItem])?
