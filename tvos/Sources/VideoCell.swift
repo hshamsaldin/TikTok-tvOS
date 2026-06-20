@@ -243,6 +243,7 @@ final class VideoCell: UICollectionViewCell {
         // "external screen" and routes audio to the external-playback path (silent)
         // unless this is off. AVPlayerViewController sets it automatically; we must.
         p.allowsExternalPlayback = false
+        p.usesExternalPlaybackWhileExternalScreenIsActive = false
         player = p
         Self.livePlayers += 1
         playerVC.player = p
@@ -458,7 +459,7 @@ final class VideoCell: UICollectionViewCell {
         debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
             + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0) rate:\(player?.rate ?? -9)\n"
             + "cat:\(cat) other:\(session.isOtherAudioPlaying) act:\(Self.audioSessionActivated)\n"
-            + "status:\(st) tcs:\(tcs) tick:\(tickCount)\n"
+            + "status:\(st) tcs:\(tcs) tick:\(tickCount) extActive:\(player?.isExternalPlaybackActive ?? false)\n"
             + "route:\(route.isEmpty ? "none" : route)"
         debugLabel.isHidden = false
     }
