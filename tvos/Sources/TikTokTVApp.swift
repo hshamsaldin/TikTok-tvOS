@@ -4,9 +4,9 @@ import AVFoundation
 @main
 struct TikTokTVApp: App {
     init() {
-        // Use the .longFormVideo route-sharing policy so audio routes to the AirPlay-2
-        // output the user selected (e.g. a Sonos), not the local HDMI route. Activation
-        // happens once at the first play (VideoCell.activateAudioSessionOnce).
+        // .longFormAudio route-sharing policy so audio routes to the AirPlay-2 output
+        // the user selected (e.g. a Sonos), not just the local HDMI route. The session
+        // is activated once at the first play (VideoCell.activateAudioSessionOnce).
         try? AVAudioSession.sharedInstance()
             .setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
     }
@@ -38,11 +38,38 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .padding(80)
             } else {
-                ProgressView().tint(.white).scaleEffect(2)
+                LoadingView()
             }
         }
         .task {
             await service.load()
+        }
+    }
+}
+
+/// TikTok-branded splash shown while the first feed loads: a chromatic music note
+/// + "TikTok" wordmark + spinner, matching the web preview's loader.
+struct LoadingView: View {
+    private let cyan = Color(red: 0.145, green: 0.957, blue: 0.933)
+    private let red = Color(red: 0.996, green: 0.173, blue: 0.333)
+
+    var body: some View {
+        VStack(spacing: 28) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Image(systemName: "music.note").foregroundStyle(cyan).offset(x: -3)
+                    Image(systemName: "music.note").foregroundStyle(red).offset(x: 3)
+                    Image(systemName: "music.note").foregroundStyle(.white)
+                }
+                .font(.system(size: 70, weight: .bold))
+                Text("TikTok")
+                    .font(.system(size: 70, weight: .heavy))
+                    .foregroundStyle(.white)
+            }
+            ProgressView().tint(.white).scaleEffect(1.5)
+            Text("Preparing your feed…")
+                .font(.title3)
+                .foregroundStyle(.secondary)
         }
     }
 }

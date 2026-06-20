@@ -155,7 +155,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.delegate = self
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 4, left: sideInset, bottom: 40, right: sideInset)
+        grid.contentInset = UIEdgeInsets(top: 4, left: 0, bottom: 40, right: 0)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
@@ -238,14 +238,27 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
-    func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
-                        sizeForItemAt indexPath: IndexPath) -> CGSize {
+    // Fixed-column cell width; 2:3 portrait posters read as a tidy grid.
+    private func itemWidth(_ cv: UICollectionView) -> CGFloat {
         let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
         let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
-        let w = floor(usable / gridColumns)
-        // 2:3 portrait posters — less extreme than 9:16, so the grid reads as a tidy
-        // grid (more rows visible) instead of one giant row with the next peeking.
+        return floor(usable / gridColumns)
+    }
+
+    func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
+                        sizeForItemAt indexPath: IndexPath) -> CGSize {
+        let w = itemWidth(cv)
         return CGSize(width: w, height: w * 3.0 / 2.0)
+    }
+
+    // Center the row exactly: split any leftover width evenly so the grid is never
+    // off-center and never shows a partial column at the edge.
+    func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
+                        insetForSectionAt section: Int) -> UIEdgeInsets {
+        let w = itemWidth(cv)
+        let rowWidth = w * gridColumns + gridSpacing * (gridColumns - 1)
+        let side = max(sideInset, (cv.bounds.width - rowWidth) / 2)
+        return UIEdgeInsets(top: 0, left: side, bottom: 0, right: side)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }

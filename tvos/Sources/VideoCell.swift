@@ -2,17 +2,19 @@ import UIKit
 import AVFoundation
 import AVKit
 
+/// One full-screen video in the vertical feed: a blurred cover fills the screen,
+/// a centered 9:16 "stage" holds the system player (AVPlayerViewController, which
+/// owns audio-session + AirPlay routing), and the TikTok-style overlay sits on top.
 final class VideoCell: UICollectionViewCell {
 
-    // Called when the clip finishes (drives autoscroll).
-    var onEnded: (() -> Void)?
+    var onEnded: (() -> Void)?            // clip finished → advance the feed
 
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let stage = UIView()          // centered 9:16 video frame
-    private let playerVC = AVPlayerViewController()   // system player owns audio session + routing
+    private let playerVC = AVPlayerViewController()
     private let gradient = CAGradientLayer()
-    private let safeMargin: CGFloat = 20  // minimal top/bottom inset (video as tall as safely possible)
+    private let safeMargin: CGFloat = 20  // small top/bottom inset, overscan-safe
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -23,7 +25,7 @@ final class VideoCell: UICollectionViewCell {
     private var appMuted = false          // user's desired mute state
     private var isActive = false          // true only while this is the on-screen cell
     private var userPaused = false        // true only when the user deliberately paused
-    private var tickCount = 0             // increments each playback tick (diagnostic)
+    private var retried = false           // allow one stream retry on failure
 
     // overlay
     private let authorLabel = UILabel()
@@ -36,13 +38,6 @@ final class VideoCell: UICollectionViewCell {
     private var fillWidth: NSLayoutConstraint!
     private let muteIcon = UIImageView()
     private let loadingSpinner = UIActivityIndicatorView(style: .large)
-
-    // On-screen audio diagnostic — off now that audio is confirmed working.
-    static let showAudioDebug = false
-    static var livePlayers = 0          // tvOS silently drops audio with too many alive
-    private let debugLabel = UILabel()
-    private var retried = false
-    private var didKick = false           // mute→unmute toggle done once per clip
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -71,25 +66,17 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func setupVideo() {
-        // Centered 9:16 "phone frame", full screen height. The blurred bg fills
-        // the rest of the screen behind it; overlays anchor to this frame.
         stage.translatesAutoresizingMaskIntoConstraints = false
         stage.layer.cornerRadius = 18
         stage.layer.masksToBounds = true
         contentView.addSubview(stage)
         NSLayoutConstraint.activate([
-            // inset top/bottom by the overscan margin so the frame + rounded
-            // corners are fully visible and never clipped by the TV bezel.
             stage.topAnchor.constraint(equalTo: contentView.topAnchor, constant: safeMargin),
             stage.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -safeMargin),
             stage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0),
         ])
 
-        // Use AVPlayerViewController (the system player) instead of a raw
-        // AVPlayerLayer. It owns audio-session activation + audio-output routing —
-        // what every working tvOS video app relies on. The hand-rolled
-        // AVAudioSession path left a raw AVPlayerLayer rendering video but silent.
         playerVC.showsPlaybackControls = false          // we draw our own chrome
         playerVC.videoGravity = .resizeAspect
         playerVC.view.isUserInteractionEnabled = false  // never steal the remote / focus
@@ -103,12 +90,9 @@ final class VideoCell: UICollectionViewCell {
             playerVC.view.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
         ])
 
-        // Gradient sits above the video but below the text overlays (added later).
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
         stage.layer.addSublayer(gradient)
 
-        // Spinner over the blurred cover while the clip loads (so it reads as
-        // "loading", not frozen).
         loadingSpinner.color = .white
         loadingSpinner.hidesWhenStopped = true
         loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
@@ -119,8 +103,7 @@ final class VideoCell: UICollectionViewCell {
         ])
     }
 
-    // Walk the responder chain to the hosting view controller so the player VC
-    // can be parented into the hierarchy (required for it to fully manage playback).
+    // Parent the player VC into the hosting controller so it fully manages playback.
     private var parentViewController: UIViewController? {
         var r: UIResponder? = next
         while let cur = r {
@@ -139,7 +122,6 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func setupOverlay() {
-        // bottom-left: author + caption + sound
         authorLabel.font = .systemFont(ofSize: 30, weight: .bold)
         authorLabel.textColor = .white
         captionLabel.font = .systemFont(ofSize: 24)
@@ -164,7 +146,6 @@ final class VideoCell: UICollectionViewCell {
         meta.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(meta)
 
-        // bottom-right: action rail
         rail.axis = .vertical
         rail.spacing = 22
         rail.alignment = .center
@@ -185,22 +166,11 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(muteIcon)
 
-        debugLabel.numberOfLines = 0
-        debugLabel.font = .monospacedSystemFont(ofSize: 18, weight: .semibold)
-        debugLabel.textColor = .systemYellow
-        debugLabel.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        debugLabel.isHidden = true
-        debugLabel.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(debugLabel)
-
         fillWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             muteIcon.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
             muteIcon.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 16),
-            debugLabel.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
-            debugLabel.trailingAnchor.constraint(equalTo: stage.trailingAnchor, constant: -16),
 
-            // thin progress bar along the very bottom edge of the video
             progressTrack.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
             progressTrack.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
             progressTrack.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
@@ -210,12 +180,10 @@ final class VideoCell: UICollectionViewCell {
             progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
             fillWidth,
 
-            // caption/sound at the video's bottom-left
             meta.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 20),
             meta.trailingAnchor.constraint(lessThanOrEqualTo: stage.trailingAnchor, constant: -20),
             meta.bottomAnchor.constraint(equalTo: progressTrack.topAnchor, constant: -16),
 
-            // rail just outside the video's right edge
             rail.leadingAnchor.constraint(equalTo: stage.trailingAnchor, constant: 24),
             rail.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -10),
         ])
@@ -241,70 +209,43 @@ final class VideoCell: UICollectionViewCell {
         guard item.id != currentID else { return }
         currentID = item.id
         retried = false
-        didKick = false
         teardownPlayer()
         openStream(for: item.id)
     }
 
-    // TEMP isolation test: when set, every clip plays this known-good MP4 (h264 +
-    // AAC, definitely has audio). If THIS has sound on device, our backend file is
-    // the problem; if it's silent too, the app's audio path is. Set back to nil after.
-    static let audioTestURL: URL? = nil   // back to the real feed
-
     private func openStream(for id: String) {
-        let url = Self.audioTestURL ?? Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
+        let url = Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
         let playerItem = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: playerItem)
         p.actionAtItemEnd = .pause
-        p.isMuted = false
+        p.isMuted = appMuted
         p.volume = 1.0
-        // Leave allowsExternalPlayback at its DEFAULT (true): the user's audio output
-        // is a Sonos over AirPlay, and AVPlayer only routes audio to an AirPlay device
-        // when external playback is allowed. Forcing it off pinned audio to HDMI and
-        // it never reached the Sonos.
-        p.allowsExternalPlayback = true
+        p.allowsExternalPlayback = true   // allow AirPlay-2 audio routing (e.g. Sonos)
         player = p
-        Self.livePlayers += 1
         playerVC.player = p
         loadingSpinner.startAnimating()
 
-        // Self-heal: if the player drops to paused while it should be running (the
-        // real bug behind the silence — tcs:0 = paused, so no audio), nudge it back
-        // to playing. Also refreshes the on-screen diagnostic on every transition.
+        // Stop the spinner once it's truly rolling; gently resume if it ever drops
+        // to paused mid-clip while it should be playing (transient interruptions).
         tcsObs = p.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             guard let self else { return }
-            self.updateDebug()
-            // The moment playback ACTUALLY starts, toggle mute off→on→off once to
-            // force the audio output to (re)engage. The user found a manual mute/
-            // unmute makes a silent clip produce sound — this automates it now that
-            // the player truly plays (earlier it was stuck paused so it couldn't help).
-            if player.timeControlStatus == .playing {
-                self.loadingSpinner.stopAnimating()       // clip is actually rolling
-                if self.isActive, !self.didKick {
-                    self.didKick = true
-                    self.kickAudio()
-                }
-            }
+            if player.timeControlStatus == .playing { self.loadingSpinner.stopAnimating() }
             guard self.isActive, !self.userPaused,
                   player.timeControlStatus == .paused,
                   player.currentItem?.status == .readyToPlay else { return }
             let cur = CMTimeGetSeconds(player.currentTime())
             let dur = CMTimeGetSeconds(player.currentItem?.duration ?? .zero)
-            if !(dur.isFinite && dur > 0 && cur >= dur - 0.3) { player.play() } // not at the end
+            if !(dur.isFinite && dur > 0 && cur >= dur - 0.3) { player.play() }
         }
 
-        // React to the item becoming playable (or failing).
         statusObs = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard let self else { return }
             switch item.status {
             case .readyToPlay:
-                if self.isActive, !self.userPaused { self.player?.play() }  // make sure it runs
-                self.updateDebug()
+                if self.isActive, !self.userPaused { self.player?.play() }
             case .failed:
-                self.updateDebug()
-                // The first clip can still be downloading/transcoding — retry once
-                // (instead of instantly skipping, which caused the "first video
-                // blurred then jumps" behavior) before giving up.
+                // The clip may still be downloading/transcoding — retry once before
+                // skipping, so a transient backend delay doesn't drop the video.
                 if let id = self.currentID, !self.retried {
                     self.retried = true
                     self.teardownPlayer()
@@ -314,19 +255,17 @@ final class VideoCell: UICollectionViewCell {
                         if self.isActive { self.play() }
                     }
                 } else if self.isActive {
-                    self.onEnded?()                    // give up: skip a dead clip
+                    self.onEnded?()
                 }
             default:
                 break
             }
         }
 
-        // Autoscroll: advance when *this* item finishes (scoped to avoid cross-cell fires).
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: playerItem, queue: .main
         ) { [weak self] _ in self?.onEnded?() }
 
-        // Progress bar updates.
         timeObserver = p.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.3, preferredTimescale: 600), queue: .main
         ) { [weak self] _ in
@@ -335,15 +274,12 @@ final class VideoCell: UICollectionViewCell {
             let cur = CMTimeGetSeconds(it.currentTime())
             guard dur.isFinite, dur > 0 else { return }
             self.fillWidth.constant = CGFloat(cur / dur) * self.progressTrack.bounds.width
-            self.tickCount += 1            // proves the clip is actually advancing
-            self.updateDebug()
         }
     }
 
     private func buildRail(_ item: FeedItem) {
         rail.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
-        // avatar with follow badge
         let avatar = AsyncImageView()
         avatar.setImage(item.avatar)
         avatar.backgroundColor = UIColor(white: 0.2, alpha: 1)
@@ -432,7 +368,7 @@ final class VideoCell: UICollectionViewCell {
         guard let player else { return }
         isActive = true
         userPaused = false
-        Self.activateAudioSessionOnce()   // activate exactly once, before playback starts
+        Self.activateAudioSessionOnce()
         player.isMuted = appMuted
         player.seek(to: .zero)
         fillWidth.constant = 0
@@ -440,31 +376,6 @@ final class VideoCell: UICollectionViewCell {
         // Become the Now Playing app so the remote's volume buttons control our audio.
         NowPlayingCenter.activate()
         NowPlayingCenter.update(title: authorLabel.text, artist: captionLabel.text)
-    }
-
-    // Activate the shared audio session a SINGLE time, lazily, at the first play.
-    // App.init is too early (setActive often fails silently there → inactive
-    // session → AVPlayer plays video with no audio). Doing it once here — before
-    // any player.play() — means the session is live without the per-cell
-    // re-activation churn that interrupts and pauses an already-playing clip.
-    private static var audioSessionActivated = false
-    private static func activateAudioSessionOnce() {
-        guard !audioSessionActivated else { return }
-        let s = AVAudioSession.sharedInstance()
-        do {
-            // .longFormAudio route-sharing policy (tvOS's available long-form policy):
-            // route audio to the SAME output as other long-form media — i.e. the
-            // AirPlay-2 device the user picked (their Sonos). The default policy keeps
-            // audio on the local HDMI route, which on this setup has no working speakers.
-            try s.setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
-            try s.setActive(true)
-            audioSessionActivated = true
-        } catch {
-            // Fall back to a plain playback session if the policy isn't accepted.
-            try? s.setCategory(.playback)
-            try? s.setActive(true)
-            audioSessionActivated = true
-        }
     }
 
     func pause() { isActive = false; player?.pause() }
@@ -477,47 +388,6 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.isHidden = !m
     }
 
-    /// Mute then unmute after a real delay — forces AVPlayer to re-engage its audio
-    /// output. (Automates the manual mute/unmute that makes a silent clip play sound.)
-    private func kickAudio() {
-        guard let player else { return }
-        player.isMuted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, let player = self.player else { return }
-            player.isMuted = self.appMuted          // back to the user's setting (false)
-            player.volume = 1.0
-            self.updateDebug()
-        }
-    }
-
-    // AVPlayer pauses itself when the audio session is interrupted; resume the
-    // active clip once the interruption ends (the documented way to recover).
-    @objc private func audioInterrupted(_ note: Notification) {
-        guard let info = note.userInfo,
-              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
-        if isActive, !userPaused { player?.play() }
-    }
-
-    private func updateDebug() {
-        guard Self.showAudioDebug else { return }
-        let session = AVAudioSession.sharedInstance()
-        let audio = player?.currentItem?.tracks.filter { $0.assetTrack?.mediaType == .audio } ?? []
-        let on = audio.filter { $0.isEnabled }.count
-        let cat = session.category.rawValue.replacingOccurrences(of: "AVAudioSessionCategory", with: "")
-        let st = player?.currentItem?.status.rawValue ?? -9
-        let tcs = player?.timeControlStatus.rawValue ?? -9   // 0=paused 1=waiting 2=playing
-        let route = session.currentRoute.outputs.map {
-            $0.portType.rawValue.replacingOccurrences(of: "AVAudioSessionPort", with: "")
-        }.joined(separator: ",")
-        debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
-            + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0) rate:\(player?.rate ?? -9)\n"
-            + "cat:\(cat) other:\(session.isOtherAudioPlaying) act:\(Self.audioSessionActivated)\n"
-            + "status:\(st) tcs:\(tcs) tick:\(tickCount) extActive:\(player?.isExternalPlaybackActive ?? false)\n"
-            + "route:\(route.isEmpty ? "none" : route)"
-        debugLabel.isHidden = false
-    }
-
     var isPlaying: Bool { (player?.rate ?? 0) > 0 }
 
     func togglePlayPause() {
@@ -526,8 +396,33 @@ final class VideoCell: UICollectionViewCell {
         else { userPaused = false; player.play() }
     }
 
-    // We drive navigation with swipe gestures, so cells shouldn't grab focus.
-    override var canBecomeFocused: Bool { false }
+    override var canBecomeFocused: Bool { false }   // the feed drives navigation
+
+    /// Activate the shared audio session once, before the first play. `.longFormAudio`
+    /// routes audio to the user's chosen output incl. AirPlay-2 speakers (e.g. Sonos);
+    /// `.playback` is the fallback. Done once to avoid per-cell churn that interrupts
+    /// (and pauses) an already-playing clip.
+    private static var audioSessionActivated = false
+    private static func activateAudioSessionOnce() {
+        guard !audioSessionActivated else { return }
+        let s = AVAudioSession.sharedInstance()
+        do {
+            try s.setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
+            try s.setActive(true)
+        } catch {
+            try? s.setCategory(.playback)
+            try? s.setActive(true)
+        }
+        audioSessionActivated = true
+    }
+
+    // AVPlayer pauses when the audio session is interrupted; resume when it ends.
+    @objc private func audioInterrupted(_ note: Notification) {
+        guard let info = note.userInfo,
+              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+        if isActive, !userPaused { player?.play() }
+    }
 
     private func teardownPlayer() {
         isActive = false
@@ -537,7 +432,6 @@ final class VideoCell: UICollectionViewCell {
         statusObs?.invalidate(); statusObs = nil
         tcsObs?.invalidate(); tcsObs = nil
         playerVC.player = nil
-        if player != nil { Self.livePlayers = max(0, Self.livePlayers - 1) }
         player = nil
     }
 
@@ -548,7 +442,6 @@ final class VideoCell: UICollectionViewCell {
         fillWidth.constant = 0
         bgImage.image = nil
         muteIcon.isHidden = true
-        debugLabel.isHidden = true
         loadingSpinner.stopAnimating()
     }
 }

@@ -33,24 +33,42 @@ def make_bg(w, h, path):  # opaque dark gradient
     _save(img, path)
 
 
-def _triangle(d, w, h, rgba):
-    s = min(w, h) * 0.30
-    cx, cy = w / 2, h / 2
-    d.polygon([(cx - s * 0.45, cy - s * 0.6),
-               (cx - s * 0.45, cy + s * 0.6),
-               (cx + s * 0.68, cy)], fill=rgba)
+def _note(d, w, h, color, dx=0):  # a TikTok-style eighth note
+    s = min(w, h)
+    stem_w = s * 0.085
+    stem_x = w / 2 + dx + s * 0.02
+    top = h / 2 - s * 0.30
+    bot = h / 2 + s * 0.20
+    d.rounded_rectangle([stem_x, top, stem_x + stem_w, bot], radius=stem_w / 2, fill=color)
+    # note head, bottom-left of the stem
+    hw, hh = s * 0.26, s * 0.20
+    hx = stem_x - hw * 0.72
+    d.ellipse([hx, bot - hh, hx + hw, bot], fill=color)
+    # flag hooking off the top of the stem
+    d.polygon([(stem_x + stem_w, top),
+               (stem_x + stem_w + s * 0.19, top + s * 0.06),
+               (stem_x + stem_w + s * 0.15, top + s * 0.21),
+               (stem_x + stem_w, top + s * 0.13)], fill=color)
 
 
-def make_front(w, h, path):  # transparent + white play mark
+def _chromatic(d, w, h, alpha):  # cyan + red offset + white note (the TikTok look)
+    off = min(w, h) * 0.03
+    a = (alpha,) if alpha is not None else ()
+    _note(d, w, h, (37, 244, 238) + a, dx=-off)
+    _note(d, w, h, (254, 44, 85) + a, dx=off)
+    _note(d, w, h, (255, 255, 255) + a, dx=0)
+
+
+def make_front(w, h, path):  # transparent + chromatic note (icon Front layer)
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    _triangle(ImageDraw.Draw(img), w, h, (255, 255, 255, 255))
+    _chromatic(ImageDraw.Draw(img), w, h, 255)
     _save(img, path)
 
 
-def make_flat(w, h, path):  # opaque gradient + play mark (for top-shelf imagesets)
+def make_flat(w, h, path):  # dark bg + chromatic note (top-shelf imagesets)
     make_bg(w, h, path)
     img = Image.open(path).convert("RGB")
-    _triangle(ImageDraw.Draw(img), w, h, (255, 255, 255))
+    _chromatic(ImageDraw.Draw(img), w, h, None)
     _save(img, path)
 
 
