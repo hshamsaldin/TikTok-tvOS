@@ -68,6 +68,16 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
 
+        focusFallback.backgroundColor = .clear
+        focusFallback.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(focusFallback)
+        NSLayoutConstraint.activate([
+            focusFallback.topAnchor.constraint(equalTo: view.topAnchor),
+            focusFallback.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            focusFallback.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            focusFallback.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
         [headerView, videosTitle, grid].forEach { $0?.alpha = 0 }
 
         load()
@@ -214,6 +224,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             videos = data.videos
             applyHeader()
             grid.reloadData()
+            setNeedsFocusUpdate()      // hand focus from the fallback to the first poster
+            updateFocusIfNeeded()
 
             UIView.animate(withDuration: 0.25) {
                 [self.headerView, self.videosTitle, self.grid].forEach { $0?.alpha = 1 }
@@ -293,7 +305,13 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
-    override var preferredFocusEnvironments: [UIFocusEnvironment] { [grid] }
+    // tvOS needs SOMETHING focusable to reliably deliver remote presses (incl.
+    // Menu/Back). While the grid is still empty during the initial load, it has
+    // no cells to focus — this invisible fallback keeps Back working immediately,
+    // before the first video even arrives. The grid takes priority once populated.
+    private let focusFallback = RemoteInputView()
+
+    override var preferredFocusEnvironments: [UIFocusEnvironment] { [grid, focusFallback] }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
