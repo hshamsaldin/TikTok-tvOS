@@ -21,6 +21,8 @@ final class VideoCell: UICollectionViewCell {
     private var endObserver: NSObjectProtocol?
     private var statusObs: NSKeyValueObservation?
     private var tcsObs: NSKeyValueObservation?
+    private var presSizeObs: NSKeyValueObservation?
+    private var stageAspect: NSLayoutConstraint!
     private var currentID: String?
     private var appMuted = false          // user's desired mute state
     private var isActive = false          // true only while this is the on-screen cell
@@ -70,11 +72,18 @@ final class VideoCell: UICollectionViewCell {
         stage.layer.cornerRadius = 18
         stage.layer.masksToBounds = true
         contentView.addSubview(stage)
+        // The stage is the LARGEST rect of the video's aspect that fits the screen.
+        // Aspect starts at 9:16 and updates to the real video size once known, so the
+        // video fills the frame exactly (no black bars) and the blur fills around it.
+        stageAspect = stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0)
+        let grow = stage.heightAnchor.constraint(equalTo: contentView.heightAnchor, constant: -2 * safeMargin)
+        grow.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            stage.topAnchor.constraint(equalTo: contentView.topAnchor, constant: safeMargin),
-            stage.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -safeMargin),
             stage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0),
+            stage.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            stage.heightAnchor.constraint(lessThanOrEqualTo: contentView.heightAnchor, constant: -2 * safeMargin),
+            stage.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -2 * safeMargin),
+            grow, stageAspect,
         ])
 
         playerVC.showsPlaybackControls = false          // we draw our own chrome
@@ -101,6 +110,17 @@ final class VideoCell: UICollectionViewCell {
             loadingSpinner.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
             loadingSpinner.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
         ])
+    }
+
+    // Resize the frame to the video's real aspect ratio (width:height).
+    private func updateStageAspect(_ size: CGSize) {
+        guard size.width > 0, size.height > 0, stageAspect != nil else { return }
+        let aspect = size.width / size.height
+        guard abs(stageAspect.multiplier - aspect) > 0.001 else { return }
+        stageAspect.isActive = false
+        stageAspect = stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: aspect)
+        stageAspect.isActive = true
+        UIView.animate(withDuration: 0.2) { self.contentView.layoutIfNeeded() }
     }
 
     // Parent the player VC into the hosting controller so it fully manages playback.
@@ -224,6 +244,13 @@ final class VideoCell: UICollectionViewCell {
         player = p
         playerVC.player = p
         loadingSpinner.startAnimating()
+
+        // Reset the frame to 9:16 for the new clip, then snap it to the real video
+        // shape once known so the video fills the frame with no black bars.
+        updateStageAspect(CGSize(width: 9, height: 16))
+        presSizeObs = playerItem.observe(\.presentationSize, options: [.new]) { [weak self] item, _ in
+            self?.updateStageAspect(item.presentationSize)
+        }
 
         // Stop the spinner once it's truly rolling; gently resume if it ever drops
         // to paused mid-clip while it should be playing (transient interruptions).
@@ -431,6 +458,7 @@ final class VideoCell: UICollectionViewCell {
         if let e = endObserver { NotificationCenter.default.removeObserver(e); endObserver = nil }
         statusObs?.invalidate(); statusObs = nil
         tcsObs?.invalidate(); tcsObs = nil
+        presSizeObs?.invalidate(); presSizeObs = nil
         playerVC.player = nil
         player = nil
     }
