@@ -33,9 +33,10 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
 
-    private let gridSpacing: CGFloat = 22
-    private let sideInset: CGFloat = 80
-    private var lastGridHeight: CGFloat = 0
+    private let gridColumns: CGFloat = 6      // Apple: a handful of cards reads better
+    private let gridSpacing: CGFloat = 30     // room for the focus scale, no overlap
+    private let sideInset: CGFloat = 90       // ≥ 60pt safe margin, nudged in a bit
+    private var lastGridWidth: CGFloat = 0
 
     init(username: String) {
         self.username = username
@@ -73,21 +74,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     // MARK: setup
 
     private func setupBackdrop() {
-        backdrop.contentMode = .scaleAspectFill
-        backdrop.clipsToBounds = true
-        backdrop.backgroundColor = UIColor(white: 0.08, alpha: 1)
-        backdrop.frame = view.bounds
-        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(backdrop)
-
-        backdropBlur.frame = view.bounds
-        backdropBlur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(backdropBlur)
-
-        dim.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        dim.frame = view.bounds
-        dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(dim)
+        view.backgroundColor = .black   // plain black, like the icon background
     }
 
     private func setupHeader() -> UIView {
@@ -162,32 +149,31 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         videosTitle.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(videosTitle)
 
-        // One horizontal row of posters — scroll left/right; no second-row peeking.
+        // Vertical grid of poster cards — scroll DOWN for more.
         let layout = UICollectionViewFlowLayout()
-        layout.scrollDirection = .horizontal
+        layout.scrollDirection = .vertical
         layout.minimumInteritemSpacing = gridSpacing
         layout.minimumLineSpacing = gridSpacing
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
         grid.contentInsetAdjustmentBehavior = .never
-        grid.showsHorizontalScrollIndicator = false
+        grid.showsVerticalScrollIndicator = false
         grid.dataSource = self
         grid.delegate = self
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: sideInset)
+        // Top pad so the focus-scaled first row isn't clipped; side margins match header.
+        grid.contentInset = UIEdgeInsets(top: 20, left: sideInset, bottom: 40, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
         NSLayoutConstraint.activate([
-            videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
+            videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
             videosTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
-            // single row that fills the space from under "Videos" down to the bottom
-            // (taller posters, no empty band below).
-            grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 16),
+            grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 12),
             grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            grid.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -30),
+            grid.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
     }
 
@@ -240,7 +226,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
     private func applyHeader() {
         avatar.setImage(user?.avatar)
-        backdrop.setImage(user?.avatar)
         nameLabel.text = user?.nickname ?? username
         handleLabel.text = user?.username ?? username
         verifiedBadge.isHidden = !(user?.verified ?? false)
@@ -251,20 +236,22 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         bioLabel.isHidden = (user?.signature?.isEmpty != false)
     }
 
-    // Re-query item size once the grid's real height settles.
+    // Re-query item size once the grid's real width settles.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if grid.bounds.height != lastGridHeight {
-            lastGridHeight = grid.bounds.height
+        if grid.bounds.width != lastGridWidth {
+            lastGridWidth = grid.bounds.width
             grid.collectionViewLayout.invalidateLayout()
         }
     }
 
-    // One row: posters are as tall as the row, 2:3 portrait.
+    // Fixed columns of 9:16 posters (match TikTok covers → fill with no cropping).
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let h = max(cv.bounds.height, 1)
-        return CGSize(width: floor(h * 2.0 / 3.0), height: h)
+        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
+        let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
+        let w = floor(usable / gridColumns)
+        return CGSize(width: w, height: w * 16.0 / 9.0)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }

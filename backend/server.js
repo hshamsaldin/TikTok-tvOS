@@ -545,7 +545,7 @@ cleanupTemp();
 setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 
 // How many clips to fully download on startup before declaring "ready".
-const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 10);
+const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 6);
 
 // Download a list of ids with limited concurrency, reporting progress.
 async function prewarmClips(ids, concurrency, onProgress) {
