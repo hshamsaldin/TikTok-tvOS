@@ -17,7 +17,7 @@ final class AudioProbe {
     func start() {
         guard !running else { return }
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback)
+        try? session.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
         try? session.setActive(true)
 
         let format = engine.mainMixerNode.outputFormat(forBus: 0)

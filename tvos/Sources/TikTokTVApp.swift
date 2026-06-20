@@ -4,10 +4,11 @@ import AVFoundation
 @main
 struct TikTokTVApp: App {
     init() {
-        // Just set the category here. Activation happens once at the first play
-        // (VideoCell.activateAudioSessionOnce) — setActive this early in launch
-        // often fails silently, leaving an inactive session = video with no audio.
-        try? AVAudioSession.sharedInstance().setCategory(.playback)
+        // Use the .longFormVideo route-sharing policy so audio routes to the AirPlay-2
+        // output the user selected (e.g. a Sonos), not the local HDMI route. Activation
+        // happens once at the first play (VideoCell.activateAudioSessionOnce).
+        try? AVAudioSession.sharedInstance()
+            .setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
     }
 
     var body: some Scene {
