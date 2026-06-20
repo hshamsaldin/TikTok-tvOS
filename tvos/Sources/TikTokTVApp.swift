@@ -8,7 +8,7 @@ struct TikTokTVApp: App {
         // output the user selected (e.g. a Sonos), not the local HDMI route. Activation
         // happens once at the first play (VideoCell.activateAudioSessionOnce).
         try? AVAudioSession.sharedInstance()
-            .setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+            .setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
     }
 
     var body: some Scene {
@@ -42,9 +42,6 @@ struct ContentView: View {
             }
         }
         .task {
-            // TEMP: play a 440 Hz test tone (independent of AVPlayer) to find out
-            // if the app can output ANY audio. Listen for a steady beep.
-            AudioProbe.shared.start()
             await service.load()
         }
     }

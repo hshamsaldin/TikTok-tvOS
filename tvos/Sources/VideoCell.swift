@@ -433,11 +433,11 @@ final class VideoCell: UICollectionViewCell {
         guard !audioSessionActivated else { return }
         let s = AVAudioSession.sharedInstance()
         do {
-            // .longFormVideo route-sharing policy: route audio to the SAME output as
-            // other long-form media — i.e. the AirPlay-2 device the user picked
-            // (their Sonos). The default policy keeps audio on the local HDMI route,
-            // which on this setup has no working speakers.
-            try s.setCategory(.playback, mode: .moviePlayback, policy: .longFormVideo)
+            // .longFormAudio route-sharing policy (tvOS's available long-form policy):
+            // route audio to the SAME output as other long-form media — i.e. the
+            // AirPlay-2 device the user picked (their Sonos). The default policy keeps
+            // audio on the local HDMI route, which on this setup has no working speakers.
+            try s.setCategory(.playback, mode: .moviePlayback, policy: .longFormAudio)
             try s.setActive(true)
             audioSessionActivated = true
         } catch {
