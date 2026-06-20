@@ -1,12 +1,15 @@
 import UIKit
+import AVFoundation
 
-/// Full-screen vertical video feed driven by the Siri Remote:
-///   swipe up/down = next/previous · click (select / play-pause) = play/pause.
 final class FeedViewController: UIViewController,
     UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
 
     private var items: [FeedItem]
     var loadMore: (() async -> [FeedItem])?
+
+    private var pool: [String: AVPlayer] = [:]
+    private var poolOrder: [String] = []
+    private let poolMax = 5
 
     private var collectionView: UICollectionView!
     private let remoteView = RemoteInputView()   // focusable layer that captures the remote
@@ -73,19 +76,14 @@ final class FeedViewController: UIViewController,
         up.direction = .up
         let down = UISwipeGestureRecognizer(target: self, action: #selector(goPrev))
         down.direction = .down
-        let right = UISwipeGestureRecognizer(target: self, action: #selector(openComments))
-        right.direction = .right
         let left = UISwipeGestureRecognizer(target: self, action: #selector(openProfile))
         left.direction = .left
-        [up, down, right, left].forEach { remoteView.addGestureRecognizer($0) }
+        [up, down, left].forEach { remoteView.addGestureRecognizer($0) }
 
-        // App-level mute (with on-screen indicator) — the hardware mute button
-        // mutes system audio but can't be detected by the app.
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(toggleMute))
         remoteView.addGestureRecognizer(longPress)
     }
 
-    // Directional CLICKS (and select/play-pause) — most reliable remote input on tvOS.
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         var handled = true
         for press in presses {
@@ -93,7 +91,6 @@ final class FeedViewController: UIViewController,
             case .upArrow: goPrev()
             case .downArrow: goNext()
             case .leftArrow: openProfile()
-            case .rightArrow: openComments()
             case .select, .playPause: togglePlay()
             case .menu:
                 if let presented = presentedViewController {
@@ -159,6 +156,36 @@ final class FeedViewController: UIViewController,
     @objc private func goPrev() { go(to: currentIndex - 1) }
     @objc private func togglePlay() { currentCell?.togglePlayPause() }
 
+    // MARK: preload pool
+
+    func takePlayer(for id: String) -> AVPlayer? {
+        guard let p = pool[id] else { return nil }
+        pool[id] = nil
+        poolOrder.removeAll { $0 == id }
+        return p
+    }
+
+    private func preload(_ id: String) {
+        guard pool[id] == nil else { return }
+        let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
+        let p = AVPlayer(playerItem: AVPlayerItem(url: url))
+        p.isMuted = true
+        p.allowsExternalPlayback = true
+        pool[id] = p
+        poolOrder.append(id)
+        while poolOrder.count > poolMax {
+            let old = poolOrder.removeFirst()
+            pool[old]?.replaceCurrentItem(with: nil)
+            pool[old] = nil
+        }
+    }
+
+    private func preloadAround(_ index: Int) {
+        for i in [index + 1, index + 2, index + 3] where i >= 0 && i < items.count {
+            preload(items[i].id)
+        }
+    }
+
     // MARK: data source
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection section: Int) -> Int {
@@ -167,8 +194,9 @@ final class FeedViewController: UIViewController,
 
     func collectionView(_ cv: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = cv.dequeueReusableCell(withReuseIdentifier: Self.cellID, for: indexPath) as! VideoCell
+        cell.providePlayer = { [weak self] id in self?.takePlayer(for: id) }
         cell.configure(with: items[indexPath.item])
-        cell.onEnded = { [weak self] in self?.goNext() } // autoscroll
+        cell.onEnded = { [weak self] in self?.goNext() }
         return cell
     }
 
@@ -177,6 +205,7 @@ final class FeedViewController: UIViewController,
         currentCell = cell
         cell.play()
         cell.setMuted(muted)
+        preloadAround(indexPath.item)
         maybeLoadMore(indexPath.item)
     }
 

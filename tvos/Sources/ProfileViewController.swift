@@ -33,9 +33,9 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
 
-    private let gridColumns: CGFloat = 6      // Apple: a handful of cards reads better
+    private let gridColumns: CGFloat = 4
     private let gridSpacing: CGFloat = 30     // room for the focus scale, no overlap
-    private let sideInset: CGFloat = 90       // ≥ 60pt safe margin, nudged in a bit
+    private let sideInset: CGFloat = 110
     private var lastGridWidth: CGFloat = 0
 
     init(username: String) {
@@ -135,7 +135,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             avatar.widthAnchor.constraint(equalToConstant: 160),
             avatar.heightAnchor.constraint(equalToConstant: 160),
             // Sit below the Back chip so they never overlap in the top-left corner.
-            header.topAnchor.constraint(equalTo: backChip.bottomAnchor, constant: 20),
+            header.topAnchor.constraint(equalTo: backChip.bottomAnchor, constant: 6),
             header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
             header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -sideInset),
         ])
@@ -337,9 +337,9 @@ final class GridCell: UICollectionViewCell {
         super.init(frame: frame)
         contentView.layer.cornerRadius = 12
         contentView.clipsToBounds = true
-        contentView.backgroundColor = UIColor(white: 0.12, alpha: 1)
+        contentView.backgroundColor = UIColor(white: 0.10, alpha: 1)
 
-        cover.contentMode = .scaleAspectFill
+        cover.contentMode = .scaleAspectFit   // whole cover inside the fixed frame, no crop
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]

@@ -8,6 +8,7 @@ import AVKit
 final class VideoCell: UICollectionViewCell {
 
     var onEnded: (() -> Void)?            // clip finished → advance the feed
+    var providePlayer: ((String) -> AVPlayer?)?   // pre-buffered player from the feed pool
 
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
@@ -232,13 +233,21 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func openStream(for id: String) {
-        let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
-        let playerItem = AVPlayerItem(url: url)
-        let p = AVPlayer(playerItem: playerItem)
+        // Use a pre-buffered player from the feed's pool if one's ready (instant);
+        // otherwise create a fresh one.
+        let p: AVPlayer
+        let playerItem: AVPlayerItem
+        if let pooled = providePlayer?(id), let item = pooled.currentItem {
+            p = pooled; playerItem = item
+        } else {
+            let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
+            playerItem = AVPlayerItem(url: url)
+            p = AVPlayer(playerItem: playerItem)
+        }
         p.actionAtItemEnd = .pause
         p.isMuted = appMuted
         p.volume = 1.0
-        p.allowsExternalPlayback = true   // allow AirPlay-2 audio routing (e.g. Sonos)
+        p.allowsExternalPlayback = true
         player = p
         playerVC.player = p
         loadingSpinner.startAnimating()
@@ -395,10 +404,8 @@ final class VideoCell: UICollectionViewCell {
         userPaused = false
         Self.activateAudioSessionOnce()
         player.isMuted = appMuted
-        player.seek(to: .zero)
         fillWidth.constant = 0
         player.play()
-        // Become the Now Playing app so the remote's volume buttons control our audio.
         NowPlayingCenter.activate()
         NowPlayingCenter.update(title: authorLabel.text, artist: captionLabel.text)
     }
