@@ -41,9 +41,9 @@ struct ContentView: View {
             }
         }
         .task {
-            // Audio session is configured once in App.init; AVPlayer manages
-            // activation itself. Don't re-poke it here — re-activating mid-playback
-            // interrupts the active player and pauses it (the silence bug).
+            // TEMP: play a 440 Hz test tone (independent of AVPlayer) to find out
+            // if the app can output ANY audio. Listen for a steady beep.
+            AudioProbe.shared.start()
             await service.load()
         }
     }
