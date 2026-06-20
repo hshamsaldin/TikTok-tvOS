@@ -120,9 +120,24 @@ def make_front(w, h, path):              # note on transparency (icon Front laye
     _save(img, path)
 
 
-def make_flat(w, h, path):               # black + note (top-shelf imagesets)
+def make_flat(w, h, path):               # top shelf: note + "TikTok" wordmark on black
+    from PIL import ImageFont
     img = Image.new("RGBA", (w, h), (0, 0, 0, 255))
-    _paste_note(img, 0.52)
+    note_h = int(h * 0.52)
+    note = _render_note(note_h)
+    try:
+        font = ImageFont.truetype(os.path.join(HERE, "Resources", "Fonts", "Inter-Bold.ttf"), int(h * 0.34))
+    except Exception:
+        font = ImageFont.load_default()
+    text = "TikTok"
+    d = ImageDraw.Draw(img)
+    bbox = d.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    gap = int(h * 0.05)
+    total = note.width + gap + tw
+    x = (w - total) // 2
+    img.alpha_composite(note, (x, (h - note.height) // 2))
+    d.text((x + note.width + gap, (h - th) // 2 - bbox[1]), text, font=font, fill=(255, 255, 255, 255))
     _save(img.convert("RGB"), path)
 
 

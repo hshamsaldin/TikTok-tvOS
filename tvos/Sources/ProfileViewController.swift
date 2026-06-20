@@ -73,21 +73,7 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     // MARK: setup
 
     private func setupBackdrop() {
-        backdrop.contentMode = .scaleAspectFill
-        backdrop.clipsToBounds = true
-        backdrop.backgroundColor = UIColor(white: 0.08, alpha: 1)
-        backdrop.frame = view.bounds
-        backdrop.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(backdrop)
-
-        backdropBlur.frame = view.bounds
-        backdropBlur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(backdropBlur)
-
-        dim.backgroundColor = UIColor.black.withAlphaComponent(0.45)
-        dim.frame = view.bounds
-        dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.addSubview(dim)
+        view.backgroundColor = .black   // plain black, like the icon's background
     }
 
     private func setupHeader() -> UIView {
@@ -240,7 +226,6 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
     private func applyHeader() {
         avatar.setImage(user?.avatar)
-        backdrop.setImage(user?.avatar)
         nameLabel.text = user?.nickname ?? username
         handleLabel.text = user?.username ?? username
         verifiedBadge.isHidden = !(user?.verified ?? false)
@@ -260,11 +245,12 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         }
     }
 
-    // One row: posters are as tall as the row, 2:3 portrait.
+    // One row of 9:16 posters (matches the TikTok cover aspect, so covers fill the
+    // cell with no cropping — "full video" thumbnails), as tall as the row.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
         let h = max(cv.bounds.height, 1)
-        return CGSize(width: floor(h * 2.0 / 3.0), height: h)
+        return CGSize(width: floor(h * 9.0 / 16.0), height: h)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }
