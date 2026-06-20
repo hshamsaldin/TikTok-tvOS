@@ -26,16 +26,16 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private let followersStat = StatView()
     private let likesStat = StatView()
     private let videosTitle = UILabel()
+    private let verifiedBadge = UIImageView()
     private let backChip = UIStackView()
     private var headerView: UIView!
 
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
 
-    private let gridColumns: CGFloat = 5
     private let gridSpacing: CGFloat = 22
     private let sideInset: CGFloat = 80
-    private var lastGridWidth: CGFloat = 0
+    private var lastGridHeight: CGFloat = 0
 
     init(username: String) {
         self.username = username
@@ -112,11 +112,29 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         stats.spacing = 54
         stats.alignment = .leading
 
-        let info = UIStackView(arrangedSubviews: [nameLabel, handleLabel, stats, bioLabel])
+        verifiedBadge.image = UIImage(systemName: "checkmark.seal.fill")
+        verifiedBadge.tintColor = UIColor(red: 0.13, green: 0.71, blue: 0.94, alpha: 1)
+        verifiedBadge.contentMode = .scaleAspectFit
+        verifiedBadge.setContentHuggingPriority(.required, for: .horizontal)
+        verifiedBadge.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        verifiedBadge.heightAnchor.constraint(equalToConstant: 30).isActive = true
+
+        let divider = UILabel()
+        divider.text = "|"
+        divider.font = .systemFont(ofSize: 24)
+        divider.textColor = UIColor(white: 1, alpha: 0.35)
+
+        // name · @username · verified, inline on one row
+        let titleRow = UIStackView(arrangedSubviews: [nameLabel, divider, handleLabel, verifiedBadge])
+        titleRow.axis = .horizontal
+        titleRow.spacing = 12
+        titleRow.alignment = .center
+
+        let info = UIStackView(arrangedSubviews: [titleRow, stats, bioLabel])
         info.axis = .vertical
         info.spacing = 12
         info.alignment = .leading
-        info.setCustomSpacing(20, after: handleLabel)
+        info.setCustomSpacing(20, after: titleRow)
         info.setCustomSpacing(20, after: stats)
 
         let header = UIStackView(arrangedSubviews: [avatar, info])
@@ -144,28 +162,31 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         videosTitle.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(videosTitle)
 
+        // One horizontal row of posters — scroll left/right; no second-row peeking.
         let layout = UICollectionViewFlowLayout()
-        layout.scrollDirection = .vertical
+        layout.scrollDirection = .horizontal
         layout.minimumInteritemSpacing = gridSpacing
         layout.minimumLineSpacing = gridSpacing
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
         grid.contentInsetAdjustmentBehavior = .never
+        grid.showsHorizontalScrollIndicator = false
         grid.dataSource = self
         grid.delegate = self
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
-        grid.contentInset = UIEdgeInsets(top: 4, left: 0, bottom: 40, right: 0)
+        grid.contentInset = UIEdgeInsets(top: 0, left: sideInset, bottom: 0, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
         NSLayoutConstraint.activate([
-            videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
+            videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 24),
             videosTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
-            grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 14),
+            // single row directly under "Videos" (no big empty band), fills ~half height
+            grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 16),
             grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            grid.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            grid.heightAnchor.constraint(equalTo: view.heightAnchor, multiplier: 0.48),
         ])
     }
 
@@ -219,8 +240,9 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private func applyHeader() {
         avatar.setImage(user?.avatar)
         backdrop.setImage(user?.avatar)
-        nameLabel.text = user?.nickname ?? "@\(username)"
-        handleLabel.text = "@\(username)"
+        nameLabel.text = user?.nickname ?? username
+        handleLabel.text = user?.username ?? username
+        verifiedBadge.isHidden = !(user?.verified ?? false)
         followersStat.set(Format.count(user?.followers), "Followers")
         followingStat.set(Format.count(user?.following), "Following")
         likesStat.set(Format.count(user?.likes), "Likes")
@@ -228,37 +250,20 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         bioLabel.isHidden = (user?.signature?.isEmpty != false)
     }
 
-    // The flow layout can be first queried before the grid knows its real width
-    // (it then shows too few columns). Re-query once the width settles.
+    // Re-query item size once the grid's real height settles.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if grid.bounds.width != lastGridWidth {
-            lastGridWidth = grid.bounds.width
+        if grid.bounds.height != lastGridHeight {
+            lastGridHeight = grid.bounds.height
             grid.collectionViewLayout.invalidateLayout()
         }
     }
 
-    // Fixed-column cell width; 2:3 portrait posters read as a tidy grid.
-    private func itemWidth(_ cv: UICollectionView) -> CGFloat {
-        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
-        let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
-        return floor(usable / gridColumns)
-    }
-
+    // One row: posters are as tall as the row, 2:3 portrait.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let w = itemWidth(cv)
-        return CGSize(width: w, height: w * 3.0 / 2.0)
-    }
-
-    // Center the row exactly: split any leftover width evenly so the grid is never
-    // off-center and never shows a partial column at the edge.
-    func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
-                        insetForSectionAt section: Int) -> UIEdgeInsets {
-        let w = itemWidth(cv)
-        let rowWidth = w * gridColumns + gridSpacing * (gridColumns - 1)
-        let side = max(sideInset, (cv.bounds.width - rowWidth) / 2)
-        return UIEdgeInsets(top: 0, left: side, bottom: 0, right: side)
+        let h = max(cv.bounds.height, 1)
+        return CGSize(width: floor(h * 2.0 / 3.0), height: h)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }

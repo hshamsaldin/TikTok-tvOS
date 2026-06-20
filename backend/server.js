@@ -24,7 +24,7 @@ import { fetchProfile } from './profile.js';
 import {
   SOURCES, PER_SOURCE, FEED_TTL_MS, VIDEO_TTL_MS,
   RESOLVE_CONCURRENCY, PORT, FEED_MODE, FORYOU_COUNT,
-  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH,
+  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH, SKIP_TRANSCODE,
 } from './config.js';
 
 // Get a resolved video by id, using cache or a fresh yt-dlp resolve.
@@ -42,7 +42,8 @@ async function getResolved(id) {
 const downloads = new Map(); // id -> Promise<filePath>
 // Final served file. The "-aac" suffix also invalidates any older cache that
 // still has the silent HE-AACv2 track, so those get re-processed automatically.
-const localFileFor = (id) => path.join(os.tmpdir(), `tt-${id}-aac.mp4`);
+const localFileFor = (id) =>
+  path.join(os.tmpdir(), `tt-${id}-${SKIP_TRANSCODE ? 'raw' : 'aac'}.mp4`);
 
 // ids whose on-disk file we've confirmed this run is NOT silent HE-AACv2, so we
 // don't re-probe on every stream request (probing spawns ffmpeg = not free).
@@ -74,7 +75,7 @@ function ensureLocalFile(id) {
   const out = localFileFor(id);
   if (downloads.has(id)) return downloads.get(id);
   if (fs.existsSync(out) && fs.statSync(out).size > 0) {
-    if (verifiedAudio.has(id)) return Promise.resolve(out);
+    if (SKIP_TRANSCODE || verifiedAudio.has(id)) return Promise.resolve(out);
     // Validate the cached file's audio ONCE per run: a file left by a previous
     // run that had no ffmpeg (or an older build) can be silent HE-AACv2. Only
     // those get deleted and rebuilt; good/unknown files are served immediately.
@@ -122,11 +123,13 @@ function ensureLocalFile(id) {
         downloads.delete(id);
         return ok(out) ? resolve(out) : reject(new Error('download produced empty file'));
       }
-      const ff = spawn(FFMPEG, [
-        '-y', '-i', src,
-        '-c:v', 'copy', '-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '44100', '-b:a', '128k',
-        '-movflags', '+faststart', out,
-      ], { windowsHide: true });
+      // SKIP_TRANSCODE: remux only (keep TikTok's original audio) to test whether it
+      // plays on tvOS. Otherwise transcode audio to AAC-LC (video copied either way).
+      const ffArgs = SKIP_TRANSCODE
+        ? ['-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out]
+        : ['-y', '-i', src, '-c:v', 'copy', '-c:a', 'aac', '-profile:a', 'aac_low',
+           '-ar', '44100', '-b:a', '128k', '-movflags', '+faststart', out];
+      const ff = spawn(FFMPEG, ffArgs, { windowsHide: true });
       let ferr = '';
       ff.stderr.on('data', (d) => (ferr += d));
       ff.on('close', (fcode) => {
@@ -434,8 +437,13 @@ function cleanupTemp() {
 cleanupTemp();
 setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 
-server.listen(PORT, () =>
+server.listen(PORT, () => {
   console.log(
     `tiktok-appletv backend on http://0.0.0.0:${PORT}  (/api/feed)  mode=${FEED_MODE}`
-  )
-);
+  );
+  // Pre-warm on startup: scrape the feed and download the first clips NOW, so the
+  // app's loading screen resolves instantly instead of waiting for a cold scrape.
+  buildFeed()
+    .then((items) => console.log(`pre-warmed feed: ${items.length} items`))
+    .catch((e) => console.warn('pre-warm failed (will retry on first request):', String(e).slice(0, 120)));
+});

@@ -45,6 +45,12 @@ export const PYTHON = process.env.PYTHON || DEFAULT_PYTHON;
 // to trade speed for sharpness.
 export const MAX_VIDEO_WIDTH = Number(process.env.MAX_VIDEO_WIDTH || 576);
 
+// TEST: when SKIP_TRANSCODE=1, serve TikTok's original audio untouched (fast
+// `-c copy` remux only — no AAC re-encode). Lets us verify whether HE-AACv2 plays
+// on tvOS now that the HDMI port is fixed. If it does, this becomes the default
+// (much faster). Default off = current safe behavior (transcode to AAC-LC).
+export const SKIP_TRANSCODE = process.env.SKIP_TRANSCODE === '1';
+
 // How to invoke yt-dlp. We use the pip module form so no separate binary needed.
 export const YTDLP_CMD = process.env.YTDLP_CMD || DEFAULT_PYTHON;
 export const YTDLP_ARGS_PREFIX = process.env.YTDLP_CMD ? [] : ['-m', 'yt_dlp'];
