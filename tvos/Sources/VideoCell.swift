@@ -244,11 +244,11 @@ final class VideoCell: UICollectionViewCell {
         p.actionAtItemEnd = .pause
         p.isMuted = false
         p.volume = 1.0
-        // THE audio fix: with a raw AVPlayerLayer, tvOS treats the HDMI TV as an
-        // "external screen" and routes audio to the external-playback path (silent)
-        // unless this is off. AVPlayerViewController sets it automatically; we must.
-        p.allowsExternalPlayback = false
-        p.usesExternalPlaybackWhileExternalScreenIsActive = false
+        // Leave allowsExternalPlayback at its DEFAULT (true): the user's audio output
+        // is a Sonos over AirPlay, and AVPlayer only routes audio to an AirPlay device
+        // when external playback is allowed. Forcing it off pinned audio to HDMI and
+        // it never reached the Sonos.
+        p.allowsExternalPlayback = true
         player = p
         Self.livePlayers += 1
         playerVC.player = p
