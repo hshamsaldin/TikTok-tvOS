@@ -163,18 +163,73 @@ function ensureLocalFile(id) {
   return p;
 }
 
+// ===== HLS streaming =====
+// Pipe yt-dlp's download straight into ffmpeg, which transcodes on the fly to an
+// HLS playlist + segments. AVPlayer plays the first segment within ~2s while the
+// rest is still being produced — no waiting for a full download. Audio is leveled
+// (loudnorm) and re-encoded to AAC; h264 video is copied (no quality loss).
+const hlsDir = (id) => path.join(os.tmpdir(), `tt-hls-${id}`);
+const hlsJobs = new Map();
+function hlsReady(id) {
+  const d = hlsDir(id);
+  return fs.existsSync(path.join(d, 'index.m3u8')) && fs.existsSync(path.join(d, 's0.ts'));
+}
+
+function ensureHls(id) {
+  if (hlsReady(id)) return Promise.resolve(hlsDir(id));
+  if (hlsJobs.has(id)) return hlsJobs.get(id);
+  const dir = hlsDir(id);
+  fs.mkdirSync(dir, { recursive: true });
+  const playlist = path.join(dir, 'index.m3u8');
+
+  const p = new Promise((resolve, reject) => {
+    if (!FFMPEG) return reject(new Error('ffmpeg required for HLS'));
+    const yt = spawn(YTDLP_CMD, [
+      ...YTDLP_ARGS_PREFIX, '-o', '-', '--no-part', '--no-warnings', '--quiet',
+      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/b[vcodec^=h264]/b`,
+      `https://www.tiktok.com/@_/video/${id}`,
+    ], { windowsHide: true });
+    const ff = spawn(FFMPEG, [
+      '-y', '-i', 'pipe:0',
+      '-c:v', 'copy',
+      '-c:a', 'aac', '-b:a', '128k', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+      '-f', 'hls', '-hls_time', '3', '-hls_list_size', '0',
+      '-hls_flags', 'independent_segments+temp_file',
+      '-hls_segment_filename', path.join(dir, 's%d.ts'), playlist,
+    ], { windowsHide: true });
+
+    yt.stdout.pipe(ff.stdin);
+    yt.stderr.resume();
+    let ferr = '';
+    ff.stderr.on('data', (d) => { ferr += d; });
+    yt.on('error', () => {});
+    ff.on('error', reject);
+    yt.on('close', () => { try { ff.stdin.end(); } catch {} });
+    ff.on('close', () => { hlsJobs.delete(id); });
+
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (hlsReady(id)) { clearInterval(iv); resolve(dir); }
+      else if (Date.now() - t0 > 30000) {
+        clearInterval(iv);
+        try { yt.kill(); ff.kill(); } catch {}
+        reject(new Error('hls timeout: ' + ferr.slice(-160)));
+      }
+    }, 150);
+  });
+  hlsJobs.set(id, p);
+  p.catch(() => { hlsJobs.delete(id); });
+  return p;
+}
+
 // Background prefetch with limited concurrency: warm upcoming clips ahead of time
-// WITHOUT starving the clip the user is watching right now (that one is fetched
-// on-demand and ungated). The audio transcode is CPU-bound, so kicking off too
-// many at once just makes everything — including the current video — slower.
+// WITHOUT starving the clip being watched (that one is fetched on-demand, ungated).
 const PREFETCH_CONCURRENCY = 2;
 let prefetchActive = 0;
 const prefetchQueue = [];
 
 function queuePrefetch(id) {
-  const out = localFileFor(id);
-  if ((fs.existsSync(out) && fs.statSync(out).size > 0) || downloads.has(id)) return;
-  if (prefetchQueue.includes(id)) return;
+  if (hlsReady(id) || hlsJobs.has(id) || prefetchQueue.includes(id)) return;
   prefetchQueue.push(id);
   drainPrefetch();
 }
@@ -183,7 +238,7 @@ function drainPrefetch() {
   while (prefetchActive < PREFETCH_CONCURRENCY && prefetchQueue.length) {
     const id = prefetchQueue.shift();
     prefetchActive++;
-    ensureLocalFile(id)
+    ensureHls(id)
       .catch(() => {})
       .finally(() => { prefetchActive--; drainPrefetch(); });
   }
@@ -411,6 +466,34 @@ const server = http.createServer(async (req, res) => {
 
     // Stream proxy: the Apple TV plays this. yt-dlp downloads the clip, then we
     // serve it with HTTP Range support so AVPlayer can stream/seek smoothly.
+    // HLS streaming: AVPlayer plays this. index.m3u8 starts (or reuses) the
+    // pipe→ffmpeg→HLS job and serves the playlist; sN.ts serves each segment as
+    // it's produced. First frame in ~2s — no full-download wait.
+    if (url.pathname.startsWith('/api/hls/')) {
+      const parts = url.pathname.slice('/api/hls/'.length).split('/');
+      const id = (parts[0] || '').replace(/[^\w-]/g, '');
+      const file = path.basename(parts[1] || 'index.m3u8');
+      if (!id) return send(res, 404, { error: 'no id' });
+
+      if (file === 'index.m3u8') {
+        prefetchAround(id);                       // warm the next few in the background
+        try { await ensureHls(id); } catch (e) { return send(res, 500, { error: String(e).slice(0, 160) }); }
+        const data = fs.readFileSync(path.join(hlsDir(id), 'index.m3u8'));
+        res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
+        return res.end(data);
+      }
+      if (file.endsWith('.ts')) {
+        const fp = path.join(hlsDir(id), file);
+        for (let i = 0; i < 80 && !fs.existsSync(fp); i++) await new Promise((r) => setTimeout(r, 100));
+        if (!fs.existsSync(fp)) return send(res, 404, { error: 'segment not ready' });
+        const data = fs.readFileSync(fp);
+        res.writeHead(200, { 'Content-Type': 'video/mp2t', 'Content-Length': data.length });
+        return res.end(data);
+      }
+      return send(res, 404, { error: 'bad hls path' });
+    }
+
+    // Legacy MP4 stream (kept as a fallback; the app now uses /api/hls).
     if (url.pathname.startsWith('/api/stream/')) {
       const id = url.pathname.split('/').pop().replace(/[^\w-]/g, '');
       prefetchAround(id); // warm the next few clips in the background
@@ -446,14 +529,15 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-// Delete cached clips older than an hour so the temp dir doesn't grow forever.
+// Delete cached clips/HLS dirs older than an hour so the temp dir doesn't grow.
 function cleanupTemp() {
   const dir = os.tmpdir();
   for (const f of fs.readdirSync(dir)) {
-    if (!f.startsWith('tt-') || !f.endsWith('.mp4')) continue;
+    if (!f.startsWith('tt-')) continue;
     const fp = path.join(dir, f);
     try {
-      if (Date.now() - fs.statSync(fp).mtimeMs > 60 * 60 * 1000) fs.unlinkSync(fp);
+      if (Date.now() - fs.statSync(fp).mtimeMs <= 60 * 60 * 1000) continue;
+      fs.rmSync(fp, { recursive: true, force: true });   // file or tt-hls-* dir
     } catch {}
   }
 }
@@ -469,7 +553,7 @@ async function prewarmClips(ids, concurrency, onProgress) {
   async function worker() {
     while (next < ids.length) {
       const id = ids[next++];
-      try { await ensureLocalFile(id); } catch {}
+      try { await ensureHls(id); } catch {}
       onProgress(++done, ids.length);
     }
   }

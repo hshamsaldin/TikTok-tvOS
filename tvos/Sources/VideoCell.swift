@@ -214,7 +214,7 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func openStream(for id: String) {
-        let url = Config.backendBaseURL.appendingPathComponent("api/stream/\(id)")
+        let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
         let playerItem = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: playerItem)
         p.actionAtItemEnd = .pause
