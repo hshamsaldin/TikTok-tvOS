@@ -40,8 +40,9 @@ struct ContentView: View {
             }
         }
         .task {
-            try? AVAudioSession.sharedInstance().setCategory(.playback)
-            try? AVAudioSession.sharedInstance().setActive(true)
+            // Audio session is configured once in App.init; AVPlayer manages
+            // activation itself. Don't re-poke it here — re-activating mid-playback
+            // interrupts the active player and pauses it (the silence bug).
             await service.load()
         }
     }

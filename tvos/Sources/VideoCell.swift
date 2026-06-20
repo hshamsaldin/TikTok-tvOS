@@ -39,7 +39,6 @@ final class VideoCell: UICollectionViewCell {
     static let showAudioDebug = true
     static var livePlayers = 0          // tvOS silently drops audio with too many alive
     private let debugLabel = UILabel()
-    private var sessionErr = "—"
     private var retried = false
 
     override init(frame: CGRect) {
@@ -48,8 +47,11 @@ final class VideoCell: UICollectionViewCell {
         setupBackground()
         setupVideo()
         setupOverlay()
+        NotificationCenter.default.addObserver(self, selector: #selector(audioInterrupted(_:)),
+            name: AVAudioSession.interruptionNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+    deinit { NotificationCenter.default.removeObserver(self) }
 
     // MARK: setup
 
@@ -203,7 +205,6 @@ final class VideoCell: UICollectionViewCell {
         p.actionAtItemEnd = .pause
         p.isMuted = false
         p.volume = 1.0
-        p.automaticallyWaitsToMinimizeStalling = false   // start now, don't sit paused buffering
         player = p
         Self.livePlayers += 1
         playerLayer.player = p
@@ -227,12 +228,9 @@ final class VideoCell: UICollectionViewCell {
             guard let self else { return }
             switch item.status {
             case .readyToPlay:
-                self.activateAudioSession()
                 if self.isActive, !self.userPaused { self.player?.play() }  // make sure it runs
-                self.kickAudio()                       // ensure unmuted, audio attached
                 self.updateDebug()
             case .failed:
-                self.sessionErr = String("\(item.error.map { "\($0)" } ?? "fail")".prefix(40))
                 self.updateDebug()
                 // The first clip can still be downloading/transcoding — retry once
                 // (instead of instantly skipping, which caused the "first video
@@ -364,13 +362,10 @@ final class VideoCell: UICollectionViewCell {
         guard let player else { return }
         isActive = true
         userPaused = false
-        activateAudioSession()
         player.isMuted = appMuted
         player.seek(to: .zero)
         fillWidth.constant = 0
         player.play()
-        // If the item is already ready (reused/prewarmed), kick audio now too.
-        if player.currentItem?.status == .readyToPlay { kickAudio() }
     }
 
     func pause() { isActive = false; player?.pause() }
@@ -383,39 +378,13 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.isHidden = !m
     }
 
-    /// tvOS needs an active `.playback`/`.moviePlayback` session for AVPlayer audio.
-    private func activateAudioSession() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playback, mode: .moviePlayback)
-            try session.setActive(true)
-            sessionErr = "ok"
-        } catch {
-            sessionErr = String("\(error)".prefix(40))
-        }
-    }
-
-    /// Force the player to re-attach to the (now active) audio route. Mirrors the
-    /// manual fix (mute→unmute starts silent clips). The real human delay matters,
-    /// so we unmute ~0.4s later, not on the same runloop. Also force-enable the
-    /// audio track in case AVPlayer left it disabled.
-    private func kickAudio() {
-        guard let player else { return }
-        enableAudioTracks()
-        player.isMuted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self, let player = self.player else { return }
-            self.enableAudioTracks()
-            player.isMuted = self.appMuted
-            player.volume = 1.0
-            self.updateDebug()
-        }
-    }
-
-    private func enableAudioTracks() {
-        player?.currentItem?.tracks.forEach {
-            if $0.assetTrack?.mediaType == .audio { $0.isEnabled = true }
-        }
+    // AVPlayer pauses itself when the audio session is interrupted; resume the
+    // active clip once the interruption ends (the documented way to recover).
+    @objc private func audioInterrupted(_ note: Notification) {
+        guard let info = note.userInfo,
+              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
+        if isActive, !userPaused { player?.play() }
     }
 
     private func updateDebug() {
@@ -431,7 +400,7 @@ final class VideoCell: UICollectionViewCell {
         }.joined(separator: ",")
         debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
             + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0) rate:\(player?.rate ?? -9)\n"
-            + "cat:\(cat) sess:\(sessionErr) other:\(session.isOtherAudioPlaying)\n"
+            + "cat:\(cat) other:\(session.isOtherAudioPlaying)\n"
             + "status:\(st) tcs:\(tcs) tick:\(tickCount)\n"
             + "route:\(route.isEmpty ? "none" : route)"
         debugLabel.isHidden = false
