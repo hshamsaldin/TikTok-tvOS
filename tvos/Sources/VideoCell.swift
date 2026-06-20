@@ -205,6 +205,10 @@ final class VideoCell: UICollectionViewCell {
         p.actionAtItemEnd = .pause
         p.isMuted = false
         p.volume = 1.0
+        // THE audio fix: with a raw AVPlayerLayer, tvOS treats the HDMI TV as an
+        // "external screen" and routes audio to the external-playback path (silent)
+        // unless this is off. AVPlayerViewController sets it automatically; we must.
+        p.allowsExternalPlayback = false
         player = p
         Self.livePlayers += 1
         playerLayer.player = p
