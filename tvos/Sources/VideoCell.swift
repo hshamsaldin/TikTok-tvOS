@@ -362,10 +362,29 @@ final class VideoCell: UICollectionViewCell {
         guard let player else { return }
         isActive = true
         userPaused = false
+        Self.activateAudioSessionOnce()   // activate exactly once, before playback starts
         player.isMuted = appMuted
         player.seek(to: .zero)
         fillWidth.constant = 0
         player.play()
+    }
+
+    // Activate the shared audio session a SINGLE time, lazily, at the first play.
+    // App.init is too early (setActive often fails silently there → inactive
+    // session → AVPlayer plays video with no audio). Doing it once here — before
+    // any player.play() — means the session is live without the per-cell
+    // re-activation churn that interrupts and pauses an already-playing clip.
+    private static var audioSessionActivated = false
+    private static func activateAudioSessionOnce() {
+        guard !audioSessionActivated else { return }
+        let s = AVAudioSession.sharedInstance()
+        do {
+            try s.setCategory(.playback)
+            try s.setActive(true)
+            audioSessionActivated = true
+        } catch {
+            // leave the flag false so the next play() retries activation
+        }
     }
 
     func pause() { isActive = false; player?.pause() }
@@ -400,7 +419,7 @@ final class VideoCell: UICollectionViewCell {
         }.joined(separator: ",")
         debugLabel.text = "audioTrk:\(audio.count) on:\(on)  players:\(Self.livePlayers)\n"
             + "muted:\(player?.isMuted ?? false) vol:\(player?.volume ?? 0) rate:\(player?.rate ?? -9)\n"
-            + "cat:\(cat) other:\(session.isOtherAudioPlaying)\n"
+            + "cat:\(cat) other:\(session.isOtherAudioPlaying) act:\(Self.audioSessionActivated)\n"
             + "status:\(st) tcs:\(tcs) tick:\(tickCount)\n"
             + "route:\(route.isEmpty ? "none" : route)"
         debugLabel.isHidden = false

@@ -4,9 +4,10 @@ import AVFoundation
 @main
 struct TikTokTVApp: App {
     init() {
-        // Play audio even though the feed autoplays (and isn't muted).
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // Just set the category here. Activation happens once at the first play
+        // (VideoCell.activateAudioSessionOnce) — setActive this early in launch
+        // often fails silently, leaving an inactive session = video with no audio.
+        try? AVAudioSession.sharedInstance().setCategory(.playback)
     }
 
     var body: some Scene {
