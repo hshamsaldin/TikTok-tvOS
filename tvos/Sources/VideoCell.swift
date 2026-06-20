@@ -11,11 +11,10 @@ final class VideoCell: UICollectionViewCell {
 
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let dim = UIView()             // darkens the blurred bg so the video pops
+    private let stage = UIView()          // centered 9:16 video frame
     private let playerVC = AVPlayerViewController()
     private let gradient = CAGradientLayer()
-    private let feedVerified = UIImageView()
-    private let edge: CGFloat = 48         // overlay inset from the screen edge
+    private let safeMargin: CGFloat = 20  // small top/bottom inset, overscan-safe
 
     private var player: AVPlayer?
     private var timeObserver: Any?
@@ -64,35 +63,43 @@ final class VideoCell: UICollectionViewCell {
         blur.frame = contentView.bounds
         blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(blur)
-
-        // Darken the blurred fill so it recedes and the video is the focus.
-        dim.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-        dim.frame = contentView.bounds
-        dim.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.addSubview(dim)
     }
 
     private func setupVideo() {
-        // Full-screen player at the video's NATURAL aspect — the video isn't forced
-        // into a fixed frame; whatever it doesn't cover shows the darkened blur.
-        playerVC.showsPlaybackControls = false
-        playerVC.videoGravity = .resizeAspect
-        playerVC.view.isUserInteractionEnabled = false
-        playerVC.view.backgroundColor = .clear
-        playerVC.view.frame = contentView.bounds
-        playerVC.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        contentView.addSubview(playerVC.view)
+        stage.translatesAutoresizingMaskIntoConstraints = false
+        stage.layer.cornerRadius = 18
+        stage.layer.masksToBounds = true
+        contentView.addSubview(stage)
+        NSLayoutConstraint.activate([
+            stage.topAnchor.constraint(equalTo: contentView.topAnchor, constant: safeMargin),
+            stage.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -safeMargin),
+            stage.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: 9.0 / 16.0),
+        ])
 
-        gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.6).cgColor]
-        contentView.layer.addSublayer(gradient)
+        playerVC.showsPlaybackControls = false          // we draw our own chrome
+        playerVC.videoGravity = .resizeAspectFill       // fill the frame (TikTok-style), no black bars
+        playerVC.view.isUserInteractionEnabled = false  // never steal the remote / focus
+        playerVC.view.backgroundColor = .clear
+        playerVC.view.translatesAutoresizingMaskIntoConstraints = false
+        stage.addSubview(playerVC.view)
+        NSLayoutConstraint.activate([
+            playerVC.view.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            playerVC.view.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            playerVC.view.topAnchor.constraint(equalTo: stage.topAnchor),
+            playerVC.view.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
+        ])
+
+        gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
+        stage.layer.addSublayer(gradient)
 
         loadingSpinner.color = .white
         loadingSpinner.hidesWhenStopped = true
         loadingSpinner.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(loadingSpinner)
+        stage.addSubview(loadingSpinner)
         NSLayoutConstraint.activate([
-            loadingSpinner.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            loadingSpinner.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            loadingSpinner.centerXAnchor.constraint(equalTo: stage.centerXAnchor),
+            loadingSpinner.centerYAnchor.constraint(equalTo: stage.centerYAnchor),
         ])
     }
 
@@ -132,20 +139,7 @@ final class VideoCell: UICollectionViewCell {
         soundRow.addArrangedSubview(noteIcon)
         soundRow.addArrangedSubview(soundLabel)
 
-        feedVerified.image = UIImage(systemName: "checkmark.seal.fill")
-        feedVerified.tintColor = UIColor(red: 0.13, green: 0.71, blue: 0.94, alpha: 1)
-        feedVerified.contentMode = .scaleAspectFit
-        feedVerified.isHidden = true
-        feedVerified.setContentHuggingPriority(.required, for: .horizontal)
-        feedVerified.widthAnchor.constraint(equalToConstant: 28).isActive = true
-        feedVerified.heightAnchor.constraint(equalToConstant: 28).isActive = true
-
-        let authorRow = UIStackView(arrangedSubviews: [authorLabel, feedVerified])
-        authorRow.axis = .horizontal
-        authorRow.spacing = 8
-        authorRow.alignment = .center
-
-        let meta = UIStackView(arrangedSubviews: [authorRow, captionLabel, soundRow])
+        let meta = UIStackView(arrangedSubviews: [authorLabel, captionLabel, soundRow])
         meta.axis = .vertical
         meta.spacing = 10
         meta.alignment = .leading
@@ -163,7 +157,7 @@ final class VideoCell: UICollectionViewCell {
         progressFill.backgroundColor = .white
         progressFill.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressFill)
-        contentView.addSubview(progressTrack)
+        stage.addSubview(progressTrack)   // inside the rounded frame so ends are clipped
 
         muteIcon.image = UIImage(systemName: "speaker.slash.fill",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .semibold))
@@ -172,37 +166,34 @@ final class VideoCell: UICollectionViewCell {
         muteIcon.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(muteIcon)
 
-        let safe = contentView.safeAreaLayoutGuide
         fillWidth = progressFill.widthAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
-            muteIcon.topAnchor.constraint(equalTo: safe.topAnchor, constant: 8),
-            muteIcon.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: 8),
+            muteIcon.topAnchor.constraint(equalTo: stage.topAnchor, constant: 16),
+            muteIcon.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 16),
 
-            // thin progress bar along the very bottom edge of the screen
-            progressTrack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            progressTrack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            progressTrack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            progressTrack.leadingAnchor.constraint(equalTo: stage.leadingAnchor),
+            progressTrack.trailingAnchor.constraint(equalTo: stage.trailingAnchor),
+            progressTrack.bottomAnchor.constraint(equalTo: stage.bottomAnchor),
             progressTrack.heightAnchor.constraint(equalToConstant: 5),
             progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
             progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
             progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
             fillWidth,
 
-            // rail bottom-right, caption bottom-left — on the screen edges
-            rail.trailingAnchor.constraint(equalTo: safe.trailingAnchor, constant: -edge),
-            rail.bottomAnchor.constraint(equalTo: safe.bottomAnchor, constant: -24),
+            meta.leadingAnchor.constraint(equalTo: stage.leadingAnchor, constant: 20),
+            meta.trailingAnchor.constraint(lessThanOrEqualTo: stage.trailingAnchor, constant: -20),
+            meta.bottomAnchor.constraint(equalTo: progressTrack.topAnchor, constant: -16),
 
-            meta.leadingAnchor.constraint(equalTo: safe.leadingAnchor, constant: edge),
-            meta.trailingAnchor.constraint(lessThanOrEqualTo: rail.leadingAnchor, constant: -24),
-            meta.bottomAnchor.constraint(equalTo: safe.bottomAnchor, constant: -24),
+            rail.leadingAnchor.constraint(equalTo: stage.trailingAnchor, constant: 24),
+            rail.bottomAnchor.constraint(equalTo: stage.bottomAnchor, constant: -10),
         ])
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let g: CGFloat = 380
-        gradient.frame = CGRect(x: 0, y: max(0, contentView.bounds.height - g),
-                                width: contentView.bounds.width, height: g)
+        let g: CGFloat = 360
+        gradient.frame = CGRect(x: 0, y: max(0, stage.bounds.height - g),
+                                width: stage.bounds.width, height: g)
     }
 
     // MARK: configure
@@ -210,7 +201,6 @@ final class VideoCell: UICollectionViewCell {
     func configure(with item: FeedItem) {
         bgImage.setImage(item.cover)
         authorLabel.text = item.displayName
-        feedVerified.isHidden = !(item.verified ?? false)
         captionLabel.text = item.caption
         soundLabel.text = item.sound
         soundRow.isHidden = (item.sound?.isEmpty != false)
