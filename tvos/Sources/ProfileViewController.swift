@@ -28,7 +28,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     // Base gap between cards. Sized so that even when a card grows under the
     // 1.05x focus zoom (~10pt per side) a clear, even gap to its neighbour remains.
     private let gridSpacing: CGFloat = 48
-    private let sideInset: CGFloat = 110
+    // Edge cards only get growth headroom from sideInset (interior cards get it
+    // from gridSpacing on BOTH sides). Widened further as a buffer against TV
+    // overscan beyond Apple's 60pt minimum — a focused edge card was getting
+    // physically clipped by the screen edge on at least one real display.
+    private let sideInset: CGFloat = 160
     private var lastGridWidth: CGFloat = 0
 
     init(username: String) {
@@ -365,23 +369,23 @@ final class GridCell: UICollectionViewCell {
         contentView.clipsToBounds = true
         contentView.backgroundColor = UIColor(white: 0.10, alpha: 1)
 
-        // .fit, matching Apple's MovieShelf sample — now that the cell's own
-        // frame is sized to the cover's true ratio, there's nothing to crop.
-        cover.contentMode = .scaleAspectFit
+        // .fill, not .fit: not every TikTok cover is a vertical 9:16 phone-video
+        // frame — some creators post landscape screen recordings. Fit shrank
+        // those down tiny inside our tall card, leaving huge empty bars (looked
+        // like "the frame is bigger than the content"). Fill always fills the
+        // card completely (cropping as needed), the same trade-off every real
+        // streaming app's poster grid makes for mixed-aspect source thumbnails.
+        cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
         cover.frame = contentView.bounds
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         contentView.addSubview(cover)
 
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.7).cgColor]
-        gradient.opacity = 0
         contentView.layer.addSublayer(gradient)
 
-        // Hidden until focused, like Apple's own MovieShelf/TVMusicShelf samples
-        // (.visibleWhenFocused()) — declutters the grid; metadata reveals on focus.
         plays.font = .app(ofSize: 18, weight: .bold)
         plays.textColor = .white
-        plays.alpha = 0
         plays.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(plays)
         NSLayoutConstraint.activate([
@@ -435,8 +439,6 @@ final class GridCell: UICollectionViewCell {
         transform = .identity
         layer.shadowOpacity = 0
         contentView.layer.borderWidth = 0
-        gradient.opacity = 0
-        plays.alpha = 0
         flash.alpha = 0
     }
 
@@ -447,8 +449,6 @@ final class GridCell: UICollectionViewCell {
             self.layer.shadowOpacity = focused ? 0.5 : 0
             self.contentView.layer.borderWidth = focused ? 3 : 0
             self.contentView.layer.borderColor = UIColor.white.cgColor
-            self.gradient.opacity = focused ? 1 : 0
-            self.plays.alpha = focused ? 1 : 0
         })
     }
 }
