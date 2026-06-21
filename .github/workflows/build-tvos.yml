@@ -7,6 +7,7 @@ name: Build tvOS IPA
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md']   # docs-only commits shouldn't burn a macOS build (private repo = paid minutes)
   workflow_dispatch:
 
 jobs:
