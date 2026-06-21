@@ -18,5 +18,8 @@ backend/auth/cookies.txt
 backend/auth/session.json
 backend/auth/chrome-profile/
 
+# Runtime caches
+backend/.audio-gain-cache.json
+
 # OS
 .DS_Store

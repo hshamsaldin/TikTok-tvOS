@@ -127,14 +127,27 @@ final class VideoCell: UICollectionViewCell {
         ])
     }
 
-    private func updateStageAspect(_ size: CGSize) {
+    /// `animated: false` is used for the synchronous reset at the very start of
+    /// a new stream — a reused cell can still hold the PREVIOUS video's aspect
+    /// ratio (e.g. landscape) until this runs, and stageShadow tracks `stage`'s
+    /// frame in layoutSubviews(). Without forcing layoutIfNeeded() immediately,
+    /// that stale frame/shadow could render for one or more frames on the new
+    /// video before the next layout pass catches up — looking like a leftover
+    /// shadow over it. The later correction (once the real presentationSize
+    /// arrives) still animates smoothly, since that's a deliberate visible
+    /// reveal, not stale state to eliminate.
+    private func updateStageAspect(_ size: CGSize, animated: Bool = true) {
         guard size.width > 0, size.height > 0, stageAspect != nil else { return }
         let aspect = size.width / size.height
         guard abs(stageAspect.multiplier - aspect) > 0.001 else { return }
         stageAspect.isActive = false
         stageAspect = stage.widthAnchor.constraint(equalTo: stage.heightAnchor, multiplier: aspect)
         stageAspect.isActive = true
-        UIView.animate(withDuration: 0.2) { self.contentView.layoutIfNeeded() }
+        if animated {
+            UIView.animate(withDuration: 0.2) { self.contentView.layoutIfNeeded() }
+        } else {
+            contentView.layoutIfNeeded()
+        }
     }
 
     private var parentViewController: UIViewController? {
@@ -271,7 +284,8 @@ final class VideoCell: UICollectionViewCell {
         loadingSpinner.startAnimating()
         applyAudioGain(to: playerItem, id: id)
 
-        updateStageAspect(CGSize(width: 9, height: 16))
+        updateStageAspect(CGSize(width: 9, height: 16), animated: false)
+        stageShadow.layer.shadowOpacity = 0.6   // restore after prepareForReuse hid it
         presSizeObs = playerItem.observe(\.presentationSize, options: [.new]) { [weak self] item, _ in
             self?.updateStageAspect(item.presentationSize)
         }
@@ -510,5 +524,10 @@ final class VideoCell: UICollectionViewCell {
         bgImage.image = nil
         muteIcon.isHidden = true
         loadingSpinner.stopAnimating()
+        // Hide the elevation shadow until openStream's synchronous aspect reset
+        // re-establishes a correct frame/shadowPath for the new video — belt and
+        // suspenders against a reused cell briefly showing a stale shadow shape
+        // left over from whatever video this cell instance displayed before.
+        stageShadow.layer.shadowOpacity = 0
     }
 }

@@ -108,7 +108,30 @@ function ensureHls(id) {
 // Picking -20 (the old value) meant most clips needed a >1.0 "boost" multiplier,
 // which the API silently ignores — exactly why leveling wasn't working.
 const TARGET_DBFS = -14;
-const audioGainCache = new Map();  // id -> gain in dB
+
+// Persisted to disk: this was an in-memory-only Map, wiped on every backend
+// restart. Since restarts happen often during normal use/testing, every video
+// then needed its loudness re-measured from scratch — which means re-
+// downloading the ENTIRE clip a second time (separate from the HLS pipeline's
+// own download) just for analysis, for every single video, competing with the
+// download that's actually trying to get the next video ready. Persisting
+// across restarts removes that repeated cost entirely after the first measure.
+const GAIN_CACHE_FILE = path.join(here, '.audio-gain-cache.json');
+const audioGainCache = new Map(
+  (() => {
+    try { return Object.entries(JSON.parse(fs.readFileSync(GAIN_CACHE_FILE, 'utf8'))); }
+    catch { return []; }
+  })()
+);
+let gainSaveTimer = null;
+function scheduleGainSave() {
+  if (gainSaveTimer) return;
+  gainSaveTimer = setTimeout(() => {
+    gainSaveTimer = null;
+    try { fs.writeFileSync(GAIN_CACHE_FILE, JSON.stringify(Object.fromEntries(audioGainCache))); } catch {}
+  }, 2000).unref();
+}
+
 const audioGainJobs = new Map();
 
 // Gain analysis spawns its OWN yt-dlp+ffmpeg pass, fully independent of the HLS
@@ -167,6 +190,7 @@ function runGainAnalysis(id) {
       // documented 0.0-1.0 range and silently ignored) — only ever attenuate.
       const gain = mean === null ? 0 : Math.max(-12, Math.min(0, TARGET_DBFS - mean));
       audioGainCache.set(id, gain);
+      scheduleGainSave();
       resolve(gain);
     });
   });
