@@ -437,6 +437,13 @@ final class VideoCell: UICollectionViewCell {
         Self.activateAudioSessionOnce()
         player.isMuted = appMuted
         fillWidth.constant = 0
+        // This only reset the BAR's visual width, never the player's actual
+        // position — a revisited cell (currentID already matches, so configure()
+        // skips reopening the stream) or a handed-off pooled player could already
+        // be partway through, so it resumed from wherever it was instead of the
+        // start, and the bar visibly snapped 0 -> real position on the next tick.
+        // Every time a clip becomes the active video it must restart from 0.
+        player.seek(to: .zero)
         player.play()
         NowPlayingCenter.activate()
         NowPlayingCenter.update(title: authorLabel.text, artist: captionLabel.text)
