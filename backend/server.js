@@ -77,7 +77,11 @@ function ensureHls(id) {
     yt.on('error', () => {});
     ff.on('error', reject);
     yt.on('close', () => { try { ff.stdin.end(); } catch {} });
-    ff.on('close', () => { hlsJobs.delete(id); });
+    // The yt-dlp+ffmpeg pair keeps running well past `resolve(dir)` above —
+    // resolve only means "first segment ready", not "process finished". This
+    // is the ONE true end-of-job signal, and drainPrefetch (below) depends on
+    // it firing to let the next queued prefetch start.
+    ff.on('close', () => { hlsJobs.delete(id); drainPrefetch(); });
 
     const t0 = Date.now();
     const iv = setInterval(() => {
@@ -198,8 +202,7 @@ function runGainAnalysis(id) {
 
 // Background prefetch with limited concurrency: warm upcoming clips ahead of time
 // WITHOUT starving the clip being watched (that one is fetched on-demand, ungated).
-const PREFETCH_CONCURRENCY = 3;
-let prefetchActive = 0;
+const PREFETCH_CONCURRENCY = 2;
 const prefetchQueue = [];
 
 function queuePrefetch(id) {
@@ -214,13 +217,21 @@ function queuePrefetch(id) {
   drainPrefetch();
 }
 
+// Gates on hlsJobs.size — the TRUE count of currently-running yt-dlp+ffmpeg
+// pairs, removed only when the process actually closes (ensureHls's
+// ff.on('close') above calls drainPrefetch again to keep this moving).
+// The previous version gated on a separate counter that was decremented as
+// soon as ensureHls's promise resolved — i.e. once the FIRST segment was
+// ready — while the underlying download/transcode kept running for the rest
+// of the clip's duration in the background, uncounted. Over a longer session
+// that let many of these background processes pile up concurrently with no
+// real cap, overloading the host and making everything — including the
+// actively-watched clip — slow to respond after enough scrolling.
 function drainPrefetch() {
-  while (prefetchActive < PREFETCH_CONCURRENCY && prefetchQueue.length) {
+  while (hlsJobs.size < PREFETCH_CONCURRENCY && prefetchQueue.length) {
     const id = prefetchQueue.shift();
-    prefetchActive++;
-    ensureHls(id)
-      .catch(() => {})
-      .finally(() => { prefetchActive--; drainPrefetch(); });
+    if (hlsReady(id) || hlsJobs.has(id)) continue;   // already covered, no slot needed
+    ensureHls(id).catch(() => {});
   }
 }
 
@@ -521,7 +532,7 @@ cleanupTemp();
 setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 
 // How many clips to fully download on startup before declaring "ready".
-const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 12);
+const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 8);
 
 // Download a list of ids with limited concurrency, reporting progress.
 async function prewarmClips(ids, concurrency, onProgress) {

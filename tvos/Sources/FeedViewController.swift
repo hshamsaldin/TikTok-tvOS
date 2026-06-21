@@ -9,7 +9,14 @@ final class FeedViewController: UIViewController,
 
     private var pool: [String: AVPlayer] = [:]
     private var poolOrder: [String] = []
-    private let poolMax = 8
+    // Dialed back from 8 — each pooled AVPlayer/AVPlayerItem holds open
+    // buffers/network state even while idle, and with the backend now doing
+    // the heavy lifting via its own ready-clip cache, the client pool only
+    // needs a couple of players ahead for an instant hand-off, not a deep
+    // reservoir. Holding too many of these alive on tvOS hardware over a long
+    // scroll session was a real contributor to the app slowing down/becoming
+    // unresponsive after dozens of videos.
+    private let poolMax = 5
 
     // Keep the last few WATCHED (scrolled-past) players alive, muted/paused,
     // instead of discarding them — scrolling back up to a just-watched clip
@@ -232,11 +239,11 @@ final class FeedViewController: UIViewController,
         let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
         let item = AVPlayerItem(url: url)
         // Pooled players sit idle, never playing, while waiting their turn — up to
-        // poolMax (8) can exist at once. Without a cap each buffers as much as it
+        // poolMax (5) can exist at once. Without a cap each buffers as much as it
         // can indefinitely, competing for bandwidth with the video actually
         // playing right now. A few seconds is enough for an instant start once it
         // becomes active; VideoCell.openStream lifts the cap when that happens.
-        item.preferredForwardBufferDuration = 8
+        item.preferredForwardBufferDuration = 5
         let p = AVPlayer(playerItem: item)
         p.isMuted = true
         p.allowsExternalPlayback = true

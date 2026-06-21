@@ -153,6 +153,22 @@ def imageset(name, sizes):
     wjson(os.path.join(iset, "Contents.json"), {"images": images, "info": INFO})
 
 
+def make_logo_mark(w, h, path):          # just the note, on transparency, no black square —
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))   # for in-app use (e.g. the loading screen),
+    _paste_note(img, 0.92)                            # NOT the app-icon brandassets catalog,
+    _save(img, path)                                   # which SwiftUI's Image(_:) can't load from.
+
+
+def plain_imageset(name, sizes, maker):
+    iset = os.path.join(BASE, f"{name}.imageset")
+    images = []
+    for (w, h, scale) in sizes:
+        fn = f"{name}@{scale}.png" if scale != "1x" else f"{name}.png"
+        maker(w, h, os.path.join(iset, fn))
+        images.append({"idiom": "universal", "filename": fn, "scale": scale})
+    wjson(os.path.join(iset, "Contents.json"), {"images": images, "info": INFO})
+
+
 wjson(os.path.join(BASE, "Contents.json"), {"info": INFO})
 wjson(os.path.join(BRAND, "Contents.json"), {
     "assets": [
@@ -168,5 +184,6 @@ imagestack("App Icon.imagestack", [(400, 240, "1x"), (800, 480, "2x")])
 imagestack("App Icon - App Store.imagestack", [(1280, 768, "1x")])
 imageset("Top Shelf Image.imageset", [(1920, 720, "1x"), (3840, 1440, "2x")])
 imageset("Top Shelf Image Wide.imageset", [(2320, 720, "1x"), (4640, 1440, "2x")])
+plain_imageset("LogoMark", [(240, 240, "1x"), (480, 480, "2x")], make_logo_mark)
 
 print("done ->", BASE)
