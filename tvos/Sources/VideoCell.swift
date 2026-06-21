@@ -223,7 +223,6 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func openStream(for id: String) {
-
         let p: AVPlayer
         let playerItem: AVPlayerItem
         if let pooled = providePlayer?(id), let item = pooled.currentItem {
@@ -265,7 +264,6 @@ final class VideoCell: UICollectionViewCell {
             case .readyToPlay:
                 if self.isActive, !self.userPaused { self.player?.play() }
             case .failed:
-
                 if let id = self.currentID, !self.retried {
                     self.retried = true
                     self.teardownPlayer()

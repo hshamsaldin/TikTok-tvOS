@@ -28,7 +28,6 @@ final class FeedViewController: UIViewController,
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
 
     func update(items: [FeedItem]) {
-
         if collectionView == nil { self.items = items }
     }
 

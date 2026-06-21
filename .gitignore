@@ -8,6 +8,10 @@ DerivedData/
 # Node
 node_modules/
 
+# Python
+__pycache__/
+*.pyc
+
 # Secrets / login state — never commit
 backend/auth/sessionid.txt
 backend/auth/cookies.txt

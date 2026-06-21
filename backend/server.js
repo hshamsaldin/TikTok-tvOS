@@ -19,12 +19,11 @@ try {
 }
 import { listSource, resolveVideo, listUserGrid } from './ytdlp.js';
 import { fetchForYou } from './foryou.js';
-import { fetchComments } from './comments.js';
 import { fetchProfile } from './profile.js';
 import {
   SOURCES, PER_SOURCE, FEED_TTL_MS, VIDEO_TTL_MS,
   RESOLVE_CONCURRENCY, PORT, FEED_MODE, FORYOU_COUNT,
-  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH, SKIP_TRANSCODE,
+  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH,
 } from './config.js';
 
 // Get a resolved video by id, using cache or a fresh yt-dlp resolve.
@@ -36,138 +35,13 @@ async function getResolved(id) {
   return item;
 }
 
-// Direct CDN requests get 403 (the URL is bound to yt-dlp's exact session), so
-// we let yt-dlp download the clip to a temp file, then serve that file with
-// Range support. Cached on disk per id; concurrent requests share one download.
-const downloads = new Map(); // id -> Promise<filePath>
-// Final served file. The "-aac" suffix also invalidates any older cache that
-// still has the silent HE-AACv2 track, so those get re-processed automatically.
-const localFileFor = (id) =>
-  path.join(os.tmpdir(), `tt-${id}-${SKIP_TRANSCODE ? 'raw' : 'aac'}.mp4`);
-
-// ids whose on-disk file we've confirmed this run is NOT silent HE-AACv2, so we
-// don't re-probe on every stream request (probing spawns ffmpeg = not free).
-const verifiedAudio = new Set();
-
-// Probe a file's audio codec via `ffmpeg -i` (stream info goes to stderr).
-// Returns 'he' (HE-AAC/HE-AACv2 → silent on tvOS, must re-transcode), 'lc'
-// (AAC-LC → good), 'none' (no audio track), or 'unknown' (couldn't probe, e.g.
-// no ffmpeg). Only 'he' triggers a rebuild — the rest are served as-is.
-function probeAudio(file) {
-  return new Promise((resolve) => {
-    if (!FFMPEG) return resolve('unknown');
-    const ff = spawn(FFMPEG, ['-hide_banner', '-i', file], { windowsHide: true });
-    let s = '';
-    ff.stderr.on('data', (d) => (s += d));
-    ff.on('error', () => resolve('unknown'));
-    ff.on('close', () => {
-      const m = s.match(/Audio:\s*([^\n,]+)/i);
-      if (!m) return resolve('none');
-      const desc = m[1].toLowerCase();
-      if (desc.includes('he-aac')) return resolve('he');
-      if (desc.includes('aac')) return resolve('lc');
-      resolve('unknown');
-    });
-  });
-}
-
-function ensureLocalFile(id) {
-  const out = localFileFor(id);
-  if (downloads.has(id)) return downloads.get(id);
-  if (fs.existsSync(out) && fs.statSync(out).size > 0) {
-    if (SKIP_TRANSCODE || verifiedAudio.has(id)) return Promise.resolve(out);
-    // Validate the cached file's audio ONCE per run: a file left by a previous
-    // run that had no ffmpeg (or an older build) can be silent HE-AACv2. Only
-    // those get deleted and rebuilt; good/unknown files are served immediately.
-    const p = probeAudio(out).then((kind) => {
-      if (kind !== 'he') { verifiedAudio.add(id); return out; }
-      try { fs.unlinkSync(out); } catch {}   // drop the stale silent file
-      downloads.delete(id);
-      return ensureLocalFile(id);            // re-download + transcode
-    });
-    downloads.set(id, p);
-    p.catch(() => {}).finally(() => { if (downloads.get(id) === p) downloads.delete(id); });
-    return p;
-  }
-
-  const src = path.join(os.tmpdir(), `tt-${id}.src.mp4`);
-  const ok = (f) => fs.existsSync(f) && fs.statSync(f).size > 0;
-
-  const p = new Promise((resolve, reject) => {
-    const args = [
-      ...YTDLP_ARGS_PREFIX,
-      '-o', src, '--no-part', '--no-warnings', '--quiet',
-      // Prefer h264 (+aac) up to MAX_VIDEO_WIDTH (vertical, so filter by width).
-      // Merge if that rendition is video-only; fall back to any h264, then anything.
-      '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/bv*[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]+ba/b[vcodec^=h264]/bv*[vcodec^=h264]+ba/bv*+ba/b`,
-      '--merge-output-format', 'mp4',
-      ...(FFMPEG ? ['--ffmpeg-location', FFMPEG] : []),
-      `https://www.tiktok.com/@_/video/${id}`,
-    ];
-    const child = spawn(YTDLP_CMD, args, { windowsHide: true });
-    let err = '';
-    child.stderr.on('data', (d) => (err += d));
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (!(code === 0 && ok(src))) {
-        downloads.delete(id);
-        reject(new Error(`download failed (${code}): ${err.slice(-200)}`));
-        return;
-      }
-      // TikTok ships HE-AACv2 audio, which tvOS AVPlayer plays SILENTLY (the track
-      // is present + "playing" but the hardware PS decoder outputs nothing). Remux
-      // with the audio transcoded to plain AAC-LC (video copied, no quality loss),
-      // which every Apple device plays reliably. +faststart for instant playback.
-      if (!FFMPEG) {
-        try { fs.renameSync(src, out); } catch {}
-        downloads.delete(id);
-        return ok(out) ? resolve(out) : reject(new Error('download produced empty file'));
-      }
-      // SKIP_TRANSCODE: remux only (keep TikTok's original audio) to test whether it
-      // plays on tvOS. Otherwise transcode audio to AAC-LC (video copied either way).
-      const ffArgs = SKIP_TRANSCODE
-        ? ['-y', '-i', src, '-c', 'copy', '-movflags', '+faststart', out]
-        : ['-y', '-i', src, '-c:v', 'copy',
-           // loudnorm = EBU R128 loudness normalization, so every clip plays at the
-           // same volume (TikTok clips vary wildly otherwise).
-           '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
-           '-c:a', 'aac', '-profile:a', 'aac_low', '-ar', '44100', '-b:a', '128k',
-           '-movflags', '+faststart', out];
-      const ff = spawn(FFMPEG, ffArgs, { windowsHide: true });
-      let ferr = '';
-      ff.stderr.on('data', (d) => (ferr += d));
-      ff.on('close', (fcode) => {
-        downloads.delete(id);
-        if (fcode === 0 && ok(out)) {
-          try { fs.unlinkSync(src); } catch {}
-          verifiedAudio.add(id);   // freshly transcoded to AAC-LC → known good
-          resolve(out);
-        } else {
-          // Transcode failed — fall back to the original so the clip still plays
-          // (may be silent, but better than nothing). Mark verified so we don't
-          // re-download it on every request trying to "fix" an unfixable clip.
-          try { fs.renameSync(src, out); } catch {}
-          if (ok(out)) verifiedAudio.add(id);
-          ok(out) ? resolve(out) : reject(new Error(`transcode failed (${fcode}): ${ferr.slice(-200)}`));
-        }
-      });
-      ff.on('error', () => {
-        downloads.delete(id);
-        try { fs.renameSync(src, out); } catch {}
-        if (ok(out)) verifiedAudio.add(id);
-        ok(out) ? resolve(out) : reject(new Error('ffmpeg spawn failed'));
-      });
-    });
-  });
-  downloads.set(id, p);
-  return p;
-}
-
 // ===== HLS streaming =====
-// Pipe yt-dlp's download straight into ffmpeg, which transcodes on the fly to an
-// HLS playlist + segments. AVPlayer plays the first segment within ~2s while the
-// rest is still being produced — no waiting for a full download. Audio is leveled
-// (loudnorm) and re-encoded to AAC; h264 video is copied (no quality loss).
+// Pipe yt-dlp's download straight into ffmpeg, which segments it into an HLS
+// playlist on the fly. AVPlayer plays the first segment within ~2s while the
+// rest is still being produced — no waiting for a full download. Both video and
+// audio are copied untouched (no re-encode, so this stays fast/low-CPU); per-clip
+// loudness leveling happens separately, on-device, via AVAudioMix (see
+// analyzeGain below) rather than a server-side transcode.
 const hlsDir = (id) => path.join(os.tmpdir(), `tt-hls-${id}`);
 const hlsJobs = new Map();
 function hlsReady(id) {
@@ -342,7 +216,6 @@ function prefetchAround(id) {
 // ---- tiny in-memory caches ----
 let feedCache = { ts: 0, data: null };
 const videoCache = new Map(); // id -> { ts, item }
-const commentsCache = new Map(); // id -> { ts, data }
 const userCache = new Map(); // username -> { ts, data }
 const profileJobs = new Map(); // username -> in-flight Promise<data>, dedupes concurrent fetches
 
@@ -457,7 +330,7 @@ function interleave(lists) {
 // Produce ready-to-display feed items.
 //  - For-You: the scrape already returns full items (id, author, stats, cover,
 //    sound, avatar). No per-video yt-dlp pass needed — bytes are fetched lazily
-//    by /api/stream. This is the big speedup.
+//    by /api/hls. This is the big speedup.
 //  - Sources: listSource only gives ids, so we resolve metadata via yt-dlp.
 async function getFeedItems() {
   if (FEED_MODE === 'foryou') {
@@ -561,20 +434,6 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { items });
     }
 
-    // Read-only comments for a video.
-    if (url.pathname.startsWith('/api/comments/')) {
-      const id = url.pathname.split('/').pop();
-      const cached = commentsCache.get(id);
-      if (cached && Date.now() - cached.ts < FEED_TTL_MS) {
-        return send(res, 200, { comments: cached.data });
-      }
-      const item = await getResolved(id);
-      const vurl = `https://www.tiktok.com/@${item.author || '_'}/video/${id}`;
-      const comments = await fetchComments(vurl, 20);
-      commentsCache.set(id, { ts: Date.now(), data: comments });
-      return send(res, 200, { comments });
-    }
-
     // Loudness gain for AVAudioMix (analysis-only, no re-encode — see analyzeGain).
     if (url.pathname.startsWith('/api/audiogain/')) {
       const id = url.pathname.split('/').pop().replace(/[^\w-]/g, '');
@@ -609,35 +468,6 @@ const server = http.createServer(async (req, res) => {
       return send(res, 404, { error: 'bad hls path' });
     }
 
-    // Legacy MP4 stream (kept as a fallback; the app now uses /api/hls).
-    if (url.pathname.startsWith('/api/stream/')) {
-      const id = url.pathname.split('/').pop().replace(/[^\w-]/g, '');
-      prefetchAround(id); // warm the next few clips in the background
-      const file = await ensureLocalFile(id);
-      const size = fs.statSync(file).size;
-      const range = req.headers.range;
-
-      if (range) {
-        const m = /bytes=(\d+)-(\d*)/.exec(range);
-        const start = m ? parseInt(m[1], 10) : 0;
-        const end = m && m[2] ? parseInt(m[2], 10) : size - 1;
-        res.writeHead(206, {
-          'Content-Type': 'video/mp4',
-          'Accept-Ranges': 'bytes',
-          'Content-Range': `bytes ${start}-${end}/${size}`,
-          'Content-Length': end - start + 1,
-        });
-        fs.createReadStream(file, { start, end }).pipe(res);
-      } else {
-        res.writeHead(200, {
-          'Content-Type': 'video/mp4',
-          'Accept-Ranges': 'bytes',
-          'Content-Length': size,
-        });
-        fs.createReadStream(file).pipe(res);
-      }
-      return;
-    }
 
     send(res, 404, { error: 'not found' });
   } catch (e) {
