@@ -24,8 +24,23 @@ final class FeedViewController: UIViewController,
         self.items = items
         self.startIndex = startIndex
         super.init(nibName: nil, bundle: nil)
+        // Stop audio the moment the user exits to the Home Screen — YouTube's tvOS
+        // app behaves this way too (it declares no background-audio capability at
+        // all). Pausing explicitly here is the reliable fix regardless of what the
+        // app's background-mode entitlement otherwise permits.
+        NotificationCenter.default.addObserver(self, selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification, object: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    @objc private func appDidEnterBackground() { currentCell?.pause() }
+    @objc private func appWillEnterForeground() {
+        guard presentedViewController == nil else { return }   // stay paused behind profile/comments
+        currentCell?.resume()
+    }
 
     func update(items: [FeedItem]) {
         if collectionView == nil { self.items = items }
