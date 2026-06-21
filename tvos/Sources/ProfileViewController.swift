@@ -24,16 +24,21 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
 
+    // Exact values from Apple's tvOS Layout HIG, four-column grid spec:
+    // https://developer.apple.com/design/human-interface-guidelines/layout
+    // unfocused content width 410pt, horizontal spacing 40pt, minimum vertical
+    // spacing 100pt, screen safe area 60pt top/bottom and 80pt sides. These are
+    // fixed values calibrated for the 1920pt reference canvas, not derived —
+    // 80 + 410*4 + 40*3 + 80 = 1920 exactly. Earlier we both derived the card
+    // width from the screen instead of using the documented fixed width, AND
+    // way over-widened sideInset (160) trying to brute-force away an edge-
+    // clipping symptom whose real cause was just not following this spec.
     private let gridColumns: CGFloat = 4
-    // Base gap between cards. Sized so that even when a card grows under the
-    // 1.05x focus zoom (~10pt per side) a clear, even gap to its neighbour remains.
-    private let gridSpacing: CGFloat = 48
-    // Edge cards only get growth headroom from sideInset (interior cards get it
-    // from gridSpacing on BOTH sides). Widened further as a buffer against TV
-    // overscan beyond Apple's 60pt minimum — a focused edge card was getting
-    // physically clipped by the screen edge on at least one real display.
-    private let sideInset: CGFloat = 160
-    private var lastGridWidth: CGFloat = 0
+    private let cardWidth: CGFloat = 410
+    private let gridSpacing: CGFloat = 40      // horizontal, between columns
+    private let rowSpacing: CGFloat = 100      // vertical, between rows
+    private let sideInset: CGFloat = 80
+    private let safeAreaTopBottom: CGFloat = 60
 
     init(username: String) {
         self.username = username
@@ -164,8 +169,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
-        layout.minimumInteritemSpacing = gridSpacing
-        layout.minimumLineSpacing = gridSpacing
+        layout.minimumInteritemSpacing = gridSpacing   // 40pt, horizontal — Apple's spec
+        layout.minimumLineSpacing = rowSpacing         // 100pt, vertical — Apple's spec
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
         grid.contentInsetAdjustmentBehavior = .never
@@ -175,10 +180,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.remembersLastFocusedIndexPath = true
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
 
-        // Let the 1.1x focus scale + shadow float over neighbours instead of
+        // Let the 1.05x focus scale + shadow float over neighbours instead of
         // being clipped at the grid's edges.
         grid.clipsToBounds = false
-        grid.contentInset = UIEdgeInsets(top: 40, left: sideInset, bottom: 60, right: sideInset)
+        grid.contentInset = UIEdgeInsets(top: 20, left: sideInset,
+                                         bottom: safeAreaTopBottom, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
@@ -249,27 +255,14 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         bioLabel.isHidden = (user?.signature?.isEmpty != false)
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        if grid.bounds.width != lastGridWidth {
-            lastGridWidth = grid.bounds.width
-            grid.collectionViewLayout.invalidateLayout()
-        }
-    }
-
-    // Size strictly by the cover's TRUE aspect ratio (9:16 — what our TikTok video-
-    // frame covers actually are), matching how Apple's own MovieShelf sample sizes
-    // posters: by the real ratio first, never distorted to force a row count. A
-    // height cap here was squashing cards away from 9:16, which is what caused
-    // letterboxing — not a Fit-vs-Fill problem. The "next row peeks in" effect
-    // comes for free from the grid simply scrolling past the viewport edge, the
-    // same way Apple's shelves work — no artificial shrinking needed.
+    // Apple's spec gives a FIXED unfocused card width (410pt) for a four-column
+    // grid, calibrated for the 1920pt reference canvas — not derived by dividing
+    // the screen width. Height follows from the cover's true 9:16 video-frame
+    // ratio. The "next row peeks in" effect comes for free from the grid simply
+    // scrolling past the viewport edge — no artificial shrinking needed.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = cv.bounds.width > 0 ? cv.bounds.width : 1920
-        let usable = width - sideInset * 2 - gridSpacing * (gridColumns - 1)
-        let w = floor(usable / gridColumns)
-        return CGSize(width: w, height: w * 16.0 / 9.0)
+        CGSize(width: cardWidth, height: cardWidth * 16.0 / 9.0)
     }
 
     func collectionView(_ cv: UICollectionView, numberOfItemsInSection s: Int) -> Int { videos.count }
