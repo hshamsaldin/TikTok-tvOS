@@ -331,7 +331,12 @@ function prefetchAround(id) {
   const data = feedCache.data || [];
   const i = data.findIndex((it) => it.id === id);
   if (i < 0) return;
-  data.slice(i + 1, i + 5).forEach((it) => queuePrefetch(it.id));   // warm next 4
+  const upcoming = data.slice(i + 1, i + 5);
+  upcoming.forEach((it) => queuePrefetch(it.id));   // warm next 4 clips
+  // Also warm the CURRENT item's channel profile — if the user opens this
+  // creator's channel (the most likely one to tap, since it's playing right
+  // now), the page should already be loaded by the time they press right.
+  queuePrefetchProfile(data[i]?.author);
 }
 
 // ---- tiny in-memory caches ----
@@ -339,6 +344,35 @@ let feedCache = { ts: 0, data: null };
 const videoCache = new Map(); // id -> { ts, item }
 const commentsCache = new Map(); // id -> { ts, data }
 const userCache = new Map(); // username -> { ts, data }
+const profileJobs = new Map(); // username -> in-flight Promise<data>, dedupes concurrent fetches
+
+// Cached + deduped channel-profile fetch. Without the in-flight map, a proactive
+// background prefetch (queuePrefetchProfile) racing the user's actual tap on the
+// same channel would spawn TWO Python+Playwright processes for the same profile.
+function getProfile(username) {
+  const key = 'p:' + username;
+  const cached = userCache.get(key);
+  if (cached && Date.now() - cached.ts < FEED_TTL_MS) return Promise.resolve(cached.data);
+  if (profileJobs.has(username)) return profileJobs.get(username);
+
+  const p = fetchProfile(username, 30).then((data) => {
+    userCache.set(key, { ts: Date.now(), data });
+    return data;
+  });
+  profileJobs.set(username, p);
+  p.finally(() => profileJobs.delete(username));
+  return p;
+}
+
+// Proactively warm a channel's profile in the background (called when the app
+// starts playing one of that channel's videos, since opening their channel is a
+// likely next action) so it's already cached by the time someone actually taps
+// it — the same pre-warming strategy that fixed the main feed's loading time.
+function queuePrefetchProfile(username) {
+  if (!username) return;
+  getProfile(username).catch(() => {});
+}
+
 // Keep several batches of videos pre-scraped AND their first clips downloaded, so
 // the Apple TV never waits at a batch boundary. A background filler keeps the queue
 // topped up; /api/more just pops a ready batch.
@@ -501,12 +535,7 @@ const server = http.createServer(async (req, res) => {
     // A channel's profile + video grid (tap an author/avatar).
     if (url.pathname.startsWith('/api/profile/')) {
       const username = decodeURIComponent(url.pathname.split('/').pop()).replace(/^@/, '');
-      const cached = userCache.get('p:' + username);
-      if (cached && Date.now() - cached.ts < FEED_TTL_MS) {
-        return send(res, 200, cached.data);
-      }
-      const data = await fetchProfile(username, 30);
-      userCache.set('p:' + username, { ts: Date.now(), data });
+      const data = await getProfile(username);
       return send(res, 200, data);
     }
 

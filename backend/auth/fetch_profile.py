@@ -11,7 +11,6 @@ Prints: {"user": {...}, "videos": [ {id, author, cover, caption, likes, ...} ]}
 import asyncio
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -37,15 +36,19 @@ USERINFO_JS = """() => {
 }"""
 
 
-def get_videos():
+async def get_videos():
     url = f"https://www.tiktok.com/@{USERNAME}"
-    r = subprocess.run(
-        [sys.executable, "-m", "yt_dlp", "--flat-playlist", "--playlist-end",
-         str(TARGET), "-J", "--no-warnings", url],
-        capture_output=True, text=True,
+    # Async subprocess so this runs CONCURRENTLY with get_header()'s Playwright
+    # work below, instead of blocking it — they were running sequentially before,
+    # adding their full costs together instead of overlapping.
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "yt_dlp", "--flat-playlist", "--playlist-end",
+        str(TARGET), "-J", "--no-warnings", url,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
+    stdout, _ = await proc.communicate()
     try:
-        d = json.loads(r.stdout)
+        d = json.loads(stdout)
     except Exception:
         return []
     out = []
@@ -93,7 +96,14 @@ async def get_header():
                                 wait_until="domcontentloaded", timeout=30000)
             except Exception:
                 pass
-            await asyncio.sleep(1.5)
+            # Wait for the actual hydration script tag rather than a blind fixed
+            # sleep — usually resolves much faster than 1.5s once the page has
+            # the data, with the same timeout as a safety net for slow loads.
+            try:
+                await page.wait_for_selector(
+                    "#__UNIVERSAL_DATA_FOR_REHYDRATION__", timeout=1500)
+            except Exception:
+                pass
             try:
                 user = await page.evaluate(USERINFO_JS)
             except Exception:
@@ -104,8 +114,7 @@ async def get_header():
 
 
 async def main():
-    videos = get_videos()
-    user = await get_header()
+    videos, user = await asyncio.gather(get_videos(), get_header())
     av, ver = user.get("avatar"), user.get("verified")
     for v in videos:
         if av and not v["avatar"]:
