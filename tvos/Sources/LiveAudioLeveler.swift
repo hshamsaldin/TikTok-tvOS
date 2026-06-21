@@ -45,6 +45,19 @@ final class LiveAudioLeveler {
     private var releaseCoeff: Float = 0.02   // recovers slowly when it quiets down
     private let targetPeak: Float = 0.7      // ~-3 dBFS — leaves headroom, no clipping
 
+    // Confirmed (in `prepare`, below) by inspecting the tap's actual negotiated
+    // AudioStreamBasicDescription, NOT assumed. Apple's docs for `prepare` say
+    // the processingFormat AVFoundation hands back "usually" matches the
+    // client format but can legitimately differ (e.g. channel-count fallback
+    // for some decoders) — "If the data is not in a convenient format... the
+    // client should convert." `process` below previously skipped this check
+    // entirely and reinterpreted whatever raw bytes it got as packed Float32,
+    // which corrupts (or silences) audio on any clip where that assumption is
+    // wrong — the likely cause of leveling working on some clips and not
+    // others. Defaults to false: an unconfirmed/non-float format plays
+    // through untouched (unleveled) rather than getting its bytes mangled.
+    private var isFloat32: Bool = false
+
     private func makeTap() -> MTAudioProcessingTap? {
         // Apple's docs explicitly warn: "On 64-bit architectures, this struct
         // contains misaligned function pointers. To avoid link-time issues,
@@ -67,12 +80,25 @@ final class LiveAudioLeveler {
             let leveler = Unmanaged<LiveAudioLeveler>.fromOpaque(storage).takeUnretainedValue()
             LiveAudioLeveler.release(leveler)
         }
+        // Apple's docs: "the preparation callback can potentially be called
+        // multiple times over the lifetime of the tap" — so this re-checks
+        // the format each time rather than caching a one-shot assumption.
+        callbacks.prepare = { tap, _, formatPointer in
+            let storage = MTAudioProcessingTapGetStorage(tap)
+            let leveler = Unmanaged<LiveAudioLeveler>.fromOpaque(storage).takeUnretainedValue()
+            let asbd = formatPointer.pointee
+            leveler.isFloat32 =
+                asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0 &&
+                asbd.mFormatFlags & kAudioFormatFlagIsPacked != 0 &&
+                asbd.mBitsPerChannel == 32
+        }
         callbacks.process = { tap, numberFrames, _, bufferListInOut, numberFramesOut, flagsOut in
             let status = MTAudioProcessingTapGetSourceAudio(
                 tap, numberFrames, bufferListInOut, flagsOut, nil, numberFramesOut)
             guard status == noErr else { return }
             let storage = MTAudioProcessingTapGetStorage(tap)
             let leveler = Unmanaged<LiveAudioLeveler>.fromOpaque(storage).takeUnretainedValue()
+            guard leveler.isFloat32 else { return }   // unconfirmed format: pass through untouched
             leveler.process(bufferListInOut)
         }
 

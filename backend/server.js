@@ -475,8 +475,14 @@ const server = http.createServer(async (req, res) => {
       if (!id) return send(res, 404, { error: 'no id' });
 
       if (file === 'index.m3u8') {
-        prefetchAround(id);                       // warm the next few in the background
+        // Get the clip the user is ACTUALLY waiting on to its first segment
+        // before starting background prefetch for upcoming clips — these
+        // share the same host's network/CPU, and starting them in parallel
+        // (the old order) meant the active clip's critical first-segment
+        // window competed with PREFETCH_CONCURRENCY other downloads for the
+        // same bandwidth right when latency matters most.
         try { await ensureHls(id); } catch (e) { return send(res, 500, { error: String(e).slice(0, 160) }); }
+        prefetchAround(id);                       // now warm the next few in the background
         const data = fs.readFileSync(path.join(hlsDir(id), 'index.m3u8'));
         res.writeHead(200, { 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-cache' });
         return res.end(data);

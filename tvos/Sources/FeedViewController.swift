@@ -83,6 +83,18 @@ final class FeedViewController: UIViewController,
         view.addSubview(remoteView)
 
         addRemoteGestures()
+
+        // Race fix: previously the pool was only ever populated reactively,
+        // from willDisplay(cell:0) — but UICollectionView can dequeue+configure
+        // the SECOND cell before that first willDisplay callback runs. When
+        // that happened, VideoCell had no pooled player to take, so it opened
+        // its own fresh AVPlayerItem for that id — and the pool then preloaded
+        // a SEPARATE, redundant AVPlayer for the same id right after, doubling
+        // the HLS requests in flight for whichever clip lost that race (in
+        // practice, almost always the second video, since cell 0 never races
+        // anything — nothing preloads it). Seeding the pool here, before the
+        // collection view has dequeued anything, closes that window.
+        preloadAround(startIndex)
     }
 
     override var preferredFocusEnvironments: [UIFocusEnvironment] { [remoteView] }
@@ -163,10 +175,22 @@ final class FeedViewController: UIViewController,
     // unresponsive compared to native tvOS paging, which always honors fast input.
     private var targetIndex: Int?
 
+    // `scrollToItem(animated: true)` runs UIKit's generic ~0.3-0.4s scroll-
+    // animation curve, the same one used for an arbitrary-distance scroll —
+    // noticeably slower than the native tvOS full-screen "page turn" feel
+    // (Apple TV app, Netflix), which snaps to the next item quickly with a
+    // decisive ease-out. Driving contentOffset directly with a short,
+    // explicit duration matches that native feel instead.
     private func go(to index: Int) {
         guard index >= 0, index < items.count else { return }
         targetIndex = index
-        collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+        let target = CGPoint(x: 0, y: CGFloat(index) * collectionView.bounds.height)
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseOut], animations: {
+            self.collectionView.contentOffset = target
+        }, completion: { [weak self] _ in
+            guard let self, self.targetIndex == index else { return }
+            self.targetIndex = nil
+        })
     }
 
     @objc private func goNext() { go(to: (targetIndex ?? currentIndex) + 1) }
@@ -208,7 +232,7 @@ final class FeedViewController: UIViewController,
         let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
         let item = AVPlayerItem(url: url)
         // Pooled players sit idle, never playing, while waiting their turn — up to
-        // poolMax (5) can exist at once. Without a cap each buffers as much as it
+        // poolMax (8) can exist at once. Without a cap each buffers as much as it
         // can indefinitely, competing for bandwidth with the video actually
         // playing right now. A few seconds is enough for an instant start once it
         // becomes active; VideoCell.openStream lifts the cap when that happens.
@@ -257,9 +281,6 @@ final class FeedViewController: UIViewController,
         if let snap = videoCell.snapshotPlayer { cacheWatched(snap.id, snap.player) }
         videoCell.pause()
     }
-
-    // Once a scroll settles, fall back to reading the real offset again.
-    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) { targetIndex = nil }
 
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
