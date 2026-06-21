@@ -228,6 +228,7 @@ final class VideoCell: UICollectionViewCell {
         let playerItem: AVPlayerItem
         if let pooled = providePlayer?(id), let item = pooled.currentItem {
             p = pooled; playerItem = item
+            playerItem.preferredForwardBufferDuration = 0   // lift the pool's idle buffer cap — this is the active video now
         } else {
             let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
             playerItem = AVPlayerItem(url: url)

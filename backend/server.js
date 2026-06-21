@@ -231,11 +231,39 @@ const TARGET_DBFS = -20;           // reference loudness we normalize towards
 const audioGainCache = new Map();  // id -> gain in dB
 const audioGainJobs = new Map();
 
+// Gain analysis spawns its OWN yt-dlp+ffmpeg pass, fully independent of the HLS
+// pipeline — it must never compete with the video the user is about to watch.
+// Capped at 1 concurrent job and only ever triggered lazily by an actual play
+// (VideoCell.applyAudioGain), never eagerly during prefetch.
+const GAIN_CONCURRENCY = 1;
+let gainActive = 0;
+const gainQueue = [];
+
 function analyzeGain(id) {
   if (audioGainCache.has(id)) return Promise.resolve(audioGainCache.get(id));
   if (audioGainJobs.has(id)) return audioGainJobs.get(id);
 
   const p = new Promise((resolve) => {
+    gainQueue.push({ id, resolve });
+    drainGainQueue();
+  });
+  audioGainJobs.set(id, p);
+  p.finally(() => audioGainJobs.delete(id));
+  return p;
+}
+
+function drainGainQueue() {
+  while (gainActive < GAIN_CONCURRENCY && gainQueue.length) {
+    const { id, resolve } = gainQueue.shift();
+    gainActive++;
+    runGainAnalysis(id)
+      .then(resolve)
+      .finally(() => { gainActive--; drainGainQueue(); });
+  }
+}
+
+function runGainAnalysis(id) {
+  return new Promise((resolve) => {
     if (!FFMPEG) return resolve(0);
     const yt = spawn(YTDLP_CMD, [
       ...YTDLP_ARGS_PREFIX, '-o', '-', '--no-part', '--no-warnings', '--quiet',
@@ -260,9 +288,6 @@ function analyzeGain(id) {
       resolve(gain);
     });
   });
-  audioGainJobs.set(id, p);
-  p.finally(() => audioGainJobs.delete(id));
-  return p;
 }
 
 // Background prefetch with limited concurrency: warm upcoming clips ahead of time
@@ -272,7 +297,12 @@ let prefetchActive = 0;
 const prefetchQueue = [];
 
 function queuePrefetch(id) {
-  analyzeGain(id).catch(() => {});   // measure loudness in the background too
+  // Gain analysis is intentionally NOT triggered here — it ran an unthrottled,
+  // fully independent yt-dlp+ffmpeg pass for every prefetched clip, competing
+  // with the HLS pipeline for the video the user is about to actually watch.
+  // The client already requests /api/audiogain lazily when a clip starts
+  // playing and tolerates it resolving late, so eager analysis here was pure
+  // redundant load with no benefit — removing it frees real capacity for HLS.
   if (hlsReady(id) || hlsJobs.has(id) || prefetchQueue.includes(id)) return;
   prefetchQueue.push(id);
   drainPrefetch();

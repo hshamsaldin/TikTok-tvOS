@@ -160,7 +160,14 @@ final class FeedViewController: UIViewController,
     private func preload(_ id: String) {
         guard pool[id] == nil else { return }
         let url = Config.backendBaseURL.appendingPathComponent("api/hls/\(id)/index.m3u8")
-        let p = AVPlayer(playerItem: AVPlayerItem(url: url))
+        let item = AVPlayerItem(url: url)
+        // Pooled players sit idle, never playing, while waiting their turn — up to
+        // poolMax (5) can exist at once. Without a cap each buffers as much as it
+        // can indefinitely, competing for bandwidth with the video actually
+        // playing right now. A few seconds is enough for an instant start once it
+        // becomes active; VideoCell.openStream lifts the cap when that happens.
+        item.preferredForwardBufferDuration = 5
+        let p = AVPlayer(playerItem: item)
         p.isMuted = true
         p.allowsExternalPlayback = true
         pool[id] = p
