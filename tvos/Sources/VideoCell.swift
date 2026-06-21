@@ -392,7 +392,11 @@ final class VideoCell: UICollectionViewCell {
             let asset = item.asset
             guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return }
             let params = AVMutableAudioMixInputParameters(track: track)
-            params.setVolume(Float(pow(10, gainDb / 20)), at: .zero)
+            // Apple's docs: setVolume's value "must be between 0.0 and 1.0" — there
+            // is no API to boost above the track's native level this way. Clamp
+            // defensively even though the backend should already only send <= 0 dB.
+            let multiplier = min(1.0, Float(pow(10, gainDb / 20)))
+            params.setVolume(multiplier, at: .zero)
             let mix = AVMutableAudioMix()
             mix.inputParameters = [params]
             item.audioMix = mix

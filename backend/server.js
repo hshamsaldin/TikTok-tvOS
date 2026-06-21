@@ -227,7 +227,13 @@ function ensureHls(id) {
 // ONCE with a cheap decode-only analysis pass (no re-encode), cache a single gain
 // number, and let AVFoundation apply it on-device via AVAudioMix — the native
 // AVFoundation mechanism for per-asset volume correction, with zero server re-encode.
-const TARGET_DBFS = -20;           // reference loudness we normalize towards
+// AVMutableAudioMixInputParameters.setVolume(_:at:) is documented to accept ONLY
+// 0.0-1.0 — there is no API to boost a track above its native level this way.
+// So TARGET_DBFS must sit near the LOUD end: quiet clips get little/no change
+// (multiplier near 1, which is fine), loud outliers get pulled down to match.
+// Picking -20 (the old value) meant most clips needed a >1.0 "boost" multiplier,
+// which the API silently ignores — exactly why leveling wasn't working.
+const TARGET_DBFS = -14;
 const audioGainCache = new Map();  // id -> gain in dB
 const audioGainJobs = new Map();
 
@@ -283,7 +289,9 @@ function runGainAnalysis(id) {
     ff.on('close', () => {
       const m = out.match(/mean_volume:\s*(-?\d+(\.\d+)?)\s*dB/);
       const mean = m ? parseFloat(m[1]) : null;
-      const gain = mean === null ? 0 : Math.max(-12, Math.min(12, TARGET_DBFS - mean));
+      // Clamp to <= 0: NEVER request a boost (10^(+dB/20) > 1.0, outside the
+      // documented 0.0-1.0 range and silently ignored) — only ever attenuate.
+      const gain = mean === null ? 0 : Math.max(-12, Math.min(0, TARGET_DBFS - mean));
       audioGainCache.set(id, gain);
       resolve(gain);
     });
