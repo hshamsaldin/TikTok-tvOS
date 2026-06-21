@@ -423,24 +423,16 @@ final class VideoCell: UICollectionViewCell {
         return stack
     }
 
-    /// Levels out TikTok's wildly inconsistent per-clip loudness using AVFoundation's
-    /// native AVAudioMix — a per-asset volume correction applied on-device, computed
-    /// once server-side by analysis only (no server re-encode, so streaming stays fast).
+    /// Levels out TikTok's wildly inconsistent per-clip loudness in real time, on
+    /// the audio render thread, via an MTAudioProcessingTap (LiveAudioLeveler) —
+    /// no backend round-trip, no pre-measuring the clip first.
     private func applyAudioGain(to item: AVPlayerItem, id: String) {
         Task { [weak self] in
-            let gainDb = await API.audioGain(id)
-            guard let self, self.currentID == id, gainDb != 0 else { return }
+            guard let self, self.currentID == id else { return }
             let asset = item.asset
             guard let track = try? await asset.loadTracks(withMediaType: .audio).first else { return }
-            let params = AVMutableAudioMixInputParameters(track: track)
-            // Apple's docs: setVolume's value "must be between 0.0 and 1.0" — there
-            // is no API to boost above the track's native level this way. Clamp
-            // defensively even though the backend should already only send <= 0 dB.
-            let multiplier = min(1.0, Float(pow(10, gainDb / 20)))
-            params.setVolume(multiplier, at: .zero)
-            let mix = AVMutableAudioMix()
-            mix.inputParameters = [params]
-            item.audioMix = mix
+            guard self.currentID == id else { return }   // cell may have moved on while awaiting
+            item.audioMix = LiveAudioLeveler.makeAudioMix(for: item, track: track)
         }
     }
 
