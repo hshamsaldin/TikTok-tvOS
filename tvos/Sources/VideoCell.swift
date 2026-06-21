@@ -10,8 +10,10 @@ final class VideoCell: UICollectionViewCell {
     private let bgImage = AsyncImageView()
     private let blur = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private let stage = UIView()
+    private let stageShadow = UIView()   // casts the elevation shadow behind `stage`
     private let playerVC = AVPlayerViewController()
     private let gradient = CAGradientLayer()
+    private let sheen = CAGradientLayer()   // soft top highlight
     private let safeMargin: CGFloat = 20
     private let railReserve: CGFloat = 220
 
@@ -64,6 +66,21 @@ final class VideoCell: UICollectionViewCell {
     }
 
     private func setupVideo() {
+        // A separate, non-clipping sibling behind `stage` casts the elevation
+        // shadow — `stage` itself has masksToBounds=true (needed for the video's
+        // rounded corners), which would also clip away any shadow drawn on it.
+        // This is the same "elevate to the foreground" language tvOS's HIG
+        // describes for focused content (Images: "the system elevates it to the
+        // foreground... applying illumination that makes the surface shine") —
+        // our video isn't focusable, so we apply that same visual language
+        // directly instead of relying on the system focus/parallax effect.
+        stageShadow.backgroundColor = .clear
+        stageShadow.layer.shadowColor = UIColor.black.cgColor
+        stageShadow.layer.shadowOffset = CGSize(width: 0, height: 18)
+        stageShadow.layer.shadowRadius = 32
+        stageShadow.layer.shadowOpacity = 0.6
+        contentView.addSubview(stageShadow)
+
         stage.translatesAutoresizingMaskIntoConstraints = false
         stage.layer.cornerRadius = 18
         stage.layer.masksToBounds = true
@@ -94,6 +111,11 @@ final class VideoCell: UICollectionViewCell {
 
         gradient.colors = [UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.65).cgColor]
         stage.layer.addSublayer(gradient)
+
+        // Subtle top "sheen" — a soft highlight along the top edge, echoing the
+        // illumination tvOS applies to focused/elevated content.
+        sheen.colors = [UIColor.white.withAlphaComponent(0.10).cgColor, UIColor.clear.cgColor]
+        stage.layer.addSublayer(sheen)
 
         loadingSpinner.color = .white
         loadingSpinner.hidesWhenStopped = true
@@ -205,6 +227,13 @@ final class VideoCell: UICollectionViewCell {
         let g: CGFloat = 360
         gradient.frame = CGRect(x: 0, y: max(0, stage.bounds.height - g),
                                 width: stage.bounds.width, height: g)
+        sheen.frame = CGRect(x: 0, y: 0, width: stage.bounds.width, height: min(140, stage.bounds.height * 0.18))
+
+        // Keep the shadow-casting view tracking `stage`'s exact frame/shape — it's
+        // a separate sibling (see setupVideo) so it isn't clipped by stage's own
+        // masksToBounds.
+        stageShadow.frame = stage.frame
+        stageShadow.layer.shadowPath = UIBezierPath(roundedRect: stageShadow.bounds, cornerRadius: 18).cgPath
     }
 
     func configure(with item: FeedItem) {
