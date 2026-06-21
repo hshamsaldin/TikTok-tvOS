@@ -181,9 +181,15 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         grid.register(GridCell.self, forCellWithReuseIdentifier: "g")
 
         // Let the 1.05x focus scale + shadow float over neighbours instead of
-        // being clipped at the grid's edges.
+        // being clipped at the grid's edges. Apple's HIG only says "provide
+        // enough spacing between the bottom of the title and the top of the
+        // unfocused items to avoid crowding" — no fixed number, so this is sized
+        // for OUR actual focus effect: a 729pt-tall card growing 1.05x moves its
+        // top edge up ~18pt when focused, plus the shadow (radius 20) spreads
+        // further still. 50pt of top inset comfortably absorbs both with margin
+        // to spare, so a focused first-row card never visually crowds "Videos".
         grid.clipsToBounds = false
-        grid.contentInset = UIEdgeInsets(top: 20, left: sideInset,
+        grid.contentInset = UIEdgeInsets(top: 50, left: sideInset,
                                          bottom: safeAreaTopBottom, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
