@@ -198,7 +198,7 @@ function runGainAnalysis(id) {
 
 // Background prefetch with limited concurrency: warm upcoming clips ahead of time
 // WITHOUT starving the clip being watched (that one is fetched on-demand, ungated).
-const PREFETCH_CONCURRENCY = 2;
+const PREFETCH_CONCURRENCY = 3;
 let prefetchActive = 0;
 const prefetchQueue = [];
 
@@ -229,8 +229,8 @@ function prefetchAround(id) {
   const data = feedCache.data || [];
   const i = data.findIndex((it) => it.id === id);
   if (i < 0) return;
-  const upcoming = data.slice(i + 1, i + 5);
-  upcoming.forEach((it) => queuePrefetch(it.id));   // warm next 4 clips
+  const upcoming = data.slice(i + 1, i + 9);
+  upcoming.forEach((it) => queuePrefetch(it.id));   // warm next 8 clips
   // Also warm the CURRENT item's channel profile — if the user opens this
   // creator's channel (the most likely one to tap, since it's playing right
   // now), the page should already be loaded by the time they press right.
@@ -285,7 +285,7 @@ async function fillBatches() {
       const items = await getFeedItems().catch(() => null);
       if (!items || !items.length) break;
       readyBatches.push(items);
-      items.slice(0, 4).forEach((it) => queuePrefetch(it.id));   // warm its first clips
+      items.slice(0, 8).forEach((it) => queuePrefetch(it.id));   // warm its first clips
     }
   } finally {
     filling = false;
@@ -379,7 +379,7 @@ async function buildFeed() {
   feedCache = { ts: Date.now(), data: items };
   // Warm the first several clips so the opening videos play instantly (queued
   // at limited concurrency so they don't all fight for CPU/network at once).
-  items.slice(0, 4).forEach((it) => queuePrefetch(it.id));
+  items.slice(0, 8).forEach((it) => queuePrefetch(it.id));
   primeMore(); // start fetching the next batch now, while the user watches this one
   return items;
 }
@@ -417,7 +417,7 @@ const server = http.createServer(async (req, res) => {
       if (!readyBatches.length) await fillBatches();
       const items = readyBatches.shift() || [];
       fillBatches();
-      items.slice(0, 3).forEach((it) => queuePrefetch(it.id));
+      items.slice(0, 8).forEach((it) => queuePrefetch(it.id));
       return send(res, 200, { items });
     }
 
@@ -515,7 +515,7 @@ cleanupTemp();
 setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 
 // How many clips to fully download on startup before declaring "ready".
-const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 6);
+const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 12);
 
 // Download a list of ids with limited concurrency, reporting progress.
 async function prewarmClips(ids, concurrency, onProgress) {

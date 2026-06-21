@@ -27,8 +27,16 @@ final class LiveAudioLeveler {
     }
 
     // Levelers are referenced only by the tap's clientInfo (an unretained C
-    // pointer) — without this, ARC would deallocate them immediately.
+    // pointer) — without this, ARC would deallocate them immediately. They
+    // are removed again in the tap's `finalize` callback below, once the
+    // tap itself is torn down (e.g. the AVPlayerItem is released when a clip
+    // scrolls out of the watched-back cache and is evicted) — without that,
+    // every clip ever played would leak one LiveAudioLeveler for the app's
+    // entire lifetime.
     private static var retainedLevelers: [LiveAudioLeveler] = []
+    private static func release(_ leveler: LiveAudioLeveler) {
+        retainedLevelers.removeAll { $0 === leveler }
+    }
 
     // MARK: - Limiter state (read/written only on the tap's processing thread)
 
@@ -51,6 +59,13 @@ final class LiveAudioLeveler {
         callbacks.clientInfo = Unmanaged.passUnretained(self).toOpaque()
         callbacks.`init` = { _, clientInfo, tapStorageOut in
             tapStorageOut.pointee = clientInfo
+        }
+        // Mirror image of `init`: drop our static keep-alive reference once the
+        // tap is torn down, so the leveler can finally be deallocated.
+        callbacks.finalize = { tap in
+            let storage = MTAudioProcessingTapGetStorage(tap)
+            let leveler = Unmanaged<LiveAudioLeveler>.fromOpaque(storage).takeUnretainedValue()
+            LiveAudioLeveler.release(leveler)
         }
         callbacks.process = { tap, numberFrames, _, bufferListInOut, numberFramesOut, flagsOut in
             let status = MTAudioProcessingTapGetSourceAudio(

@@ -9,7 +9,16 @@ final class FeedViewController: UIViewController,
 
     private var pool: [String: AVPlayer] = [:]
     private var poolOrder: [String] = []
-    private let poolMax = 5
+    private let poolMax = 8
+
+    // Keep the last few WATCHED (scrolled-past) players alive, muted/paused,
+    // instead of discarding them — scrolling back up to a just-watched clip
+    // then resumes instantly via the same providePlayer hand-off VideoCell
+    // already uses for forward-preloaded players, rather than re-requesting
+    // /api/hls and re-buffering from scratch.
+    private var watchedCache: [String: AVPlayer] = [:]
+    private var watchedOrder: [String] = []
+    private let watchedMax = 2
 
     private var collectionView: UICollectionView!
     private let remoteView = RemoteInputView()
@@ -165,10 +174,33 @@ final class FeedViewController: UIViewController,
     @objc private func togglePlay() { currentCell?.togglePlayPause() }
 
     func takePlayer(for id: String) -> AVPlayer? {
-        guard let p = pool[id] else { return nil }
-        pool[id] = nil
-        poolOrder.removeAll { $0 == id }
-        return p
+        if let p = pool[id] {
+            pool[id] = nil
+            poolOrder.removeAll { $0 == id }
+            return p
+        }
+        if let p = watchedCache[id] {
+            watchedCache[id] = nil
+            watchedOrder.removeAll { $0 == id }
+            return p
+        }
+        return nil
+    }
+
+    // Called as a cell scrolls out of view, BEFORE it tears its player down —
+    // hands the still-live AVPlayer to the watched-back cache instead of
+    // letting it be discarded.
+    private func cacheWatched(_ id: String, _ player: AVPlayer) {
+        guard pool[id] == nil, watchedCache[id] == nil else { return }
+        player.pause()
+        player.isMuted = true
+        player.currentItem?.preferredForwardBufferDuration = 5
+        watchedCache[id] = player
+        watchedOrder.append(id)
+        while watchedOrder.count > watchedMax {
+            let old = watchedOrder.removeFirst()
+            watchedCache[old] = nil
+        }
     }
 
     private func preload(_ id: String) {
@@ -180,7 +212,7 @@ final class FeedViewController: UIViewController,
         // can indefinitely, competing for bandwidth with the video actually
         // playing right now. A few seconds is enough for an instant start once it
         // becomes active; VideoCell.openStream lifts the cap when that happens.
-        item.preferredForwardBufferDuration = 5
+        item.preferredForwardBufferDuration = 8
         let p = AVPlayer(playerItem: item)
         p.isMuted = true
         p.allowsExternalPlayback = true
@@ -221,7 +253,9 @@ final class FeedViewController: UIViewController,
     }
 
     func collectionView(_ cv: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        (cell as? VideoCell)?.pause()
+        guard let videoCell = cell as? VideoCell else { return }
+        if let snap = videoCell.snapshotPlayer { cacheWatched(snap.id, snap.player) }
+        videoCell.pause()
     }
 
     // Once a scroll settles, fall back to reading the real offset again.

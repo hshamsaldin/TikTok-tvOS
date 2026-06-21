@@ -279,6 +279,14 @@ final class VideoCell: UICollectionViewCell {
         p.isMuted = appMuted
         p.volume = 1.0
         p.allowsExternalPlayback = true
+        // Default true (confirmed against the current AVPlayer docs) makes
+        // the player wait until it estimates the item can play to the end
+        // without stalling — at odds with this app's whole "first frame in
+        // ~2s" design (HLS segments arrive just-in-time from the backend's
+        // live transcode, never the full clip up front). We already manage
+        // buffering explicitly via preferredForwardBufferDuration, so opt out
+        // of AVPlayer's own heuristic delay and let readyToPlay start it.
+        p.automaticallyWaitsToMinimizeStalling = false
         player = p
         playerVC.player = p
         loadingSpinner.startAnimating()
@@ -453,6 +461,14 @@ final class VideoCell: UICollectionViewCell {
         player.play()
         NowPlayingCenter.activate()
         NowPlayingCenter.update(title: authorLabel.text, artist: captionLabel.text)
+    }
+
+    // Lets FeedViewController grab the still-live player/id pair just before a
+    // scrolled-past cell is reused (and its player torn down), so it can be
+    // kept alive in the watched-back cache instead of being discarded.
+    var snapshotPlayer: (id: String, player: AVPlayer)? {
+        guard let currentID, let player else { return nil }
+        return (currentID, player)
     }
 
     func pause() { isActive = false; player?.pause() }

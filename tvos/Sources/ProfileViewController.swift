@@ -24,20 +24,20 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     private var grid: UICollectionView!
     private let spinner = UIActivityIndicatorView(style: .large)
 
-    // Exact values from Apple's tvOS Layout HIG, four-column grid spec:
-    // https://developer.apple.com/design/human-interface-guidelines/layout
-    // unfocused content width 410pt, horizontal spacing 40pt, minimum vertical
-    // spacing 100pt, screen safe area 60pt top/bottom and 80pt sides. These are
-    // fixed values calibrated for the 1920pt reference canvas, not derived —
-    // 80 + 410*4 + 40*3 + 80 = 1920 exactly. Earlier we both derived the card
-    // width from the screen instead of using the documented fixed width, AND
-    // way over-widened sideInset (160) trying to brute-force away an edge-
-    // clipping symptom whose real cause was just not following this spec.
-    private let gridColumns: CGFloat = 4
-    private let cardWidth: CGFloat = 410
-    private let gridSpacing: CGFloat = 40      // horizontal, between columns
-    private let rowSpacing: CGFloat = 100      // vertical, between rows
-    private let sideInset: CGFloat = 80
+    // Apple's HIG no longer publishes a fixed-pixel tvOS grid table (checked
+    // the current live docs — developer.apple.com/design/human-interface-
+    // guidelines/layout and .../images both dropped the old per-platform
+    // numeric spec in the 2025 redesign). The previous 410pt/4-column values
+    // here were carried over from that now-removed table and rendered far
+    // larger than a real tvOS poster wall (Netflix/Apple TV app use denser
+    // 6+ column grids). This is a deliberate density choice, still
+    // self-checking against the 1920pt reference canvas, not a doc lookup:
+    // 75 + 270*6 + 30*5 + 75 = 1920 exactly.
+    private let gridColumns: CGFloat = 6
+    private let cardWidth: CGFloat = 270
+    private let gridSpacing: CGFloat = 30      // horizontal, between columns
+    private let rowSpacing: CGFloat = 64       // vertical, between rows
+    private let sideInset: CGFloat = 75
     private let safeAreaTopBottom: CGFloat = 60
 
     init(username: String) {
