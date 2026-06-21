@@ -189,8 +189,13 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         // further still. 50pt of top inset comfortably absorbs both with margin
         // to spare, so a focused first-row card never visually crowds "Videos".
         grid.clipsToBounds = false
-        grid.contentInset = UIEdgeInsets(top: 50, left: sideInset,
-                                         bottom: safeAreaTopBottom, right: sideInset)
+        // sectionInset (UICollectionViewFlowLayout), not contentInset (UIScrollView)
+        // — sectionInset is the layout's own margin around a section's cells, the
+        // documented property for exactly this. contentInset is a generic scroll-
+        // view concept (e.g. avoiding a nav bar overlap) that also shifts scroll-
+        // offset/bounce math, which isn't a concern we actually have here.
+        layout.sectionInset = UIEdgeInsets(top: 50, left: sideInset,
+                                           bottom: safeAreaTopBottom, right: sideInset)
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
 
