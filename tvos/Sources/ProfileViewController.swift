@@ -277,9 +277,16 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
     }
 
     func collectionView(_ cv: UICollectionView, didSelectItemAt ip: IndexPath) {
-        let feed = FeedViewController(items: videos, startIndex: ip.item)
-        feed.modalPresentationStyle = .fullScreen
-        present(feed, animated: true)
+        guard let cell = cv.cellForItem(at: ip) as? GridCell else {
+            present(FeedViewController(items: videos, startIndex: ip.item), animated: true)
+            return
+        }
+        cell.flashSelected { [weak self] in
+            guard let self else { return }
+            let feed = FeedViewController(items: self.videos, startIndex: ip.item)
+            feed.modalPresentationStyle = .fullScreen
+            self.present(feed, animated: true)
+        }
     }
 
     func collectionView(_ cv: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt ip: IndexPath) {
@@ -350,6 +357,7 @@ final class GridCell: UICollectionViewCell {
     private let cover = AsyncImageView()
     private let gradient = CAGradientLayer()
     private let plays = UILabel()
+    private let flash = UIView()   // brief "selected" feedback (Apple's 5-state focus model)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -385,8 +393,28 @@ final class GridCell: UICollectionViewCell {
         layer.shadowOffset = CGSize(width: 0, height: 12)
         layer.shadowRadius = 20
         layer.shadowOpacity = 0
+
+        flash.backgroundColor = .white
+        flash.alpha = 0
+        flash.frame = contentView.bounds
+        flash.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        contentView.addSubview(flash)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) not used") }
+
+    /// Apple's documented "selecting" state: instant visual feedback the moment
+    /// someone chooses an item, before it transitions away — distinct from the
+    /// focused state. A quick white flash, like a button briefly inverting.
+    func flashSelected(completion: @escaping () -> Void) {
+        UIView.animate(withDuration: 0.08, animations: {
+            self.flash.alpha = 0.35
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.12, animations: {
+                self.flash.alpha = 0
+            })
+            completion()
+        })
+    }
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -409,6 +437,7 @@ final class GridCell: UICollectionViewCell {
         contentView.layer.borderWidth = 0
         gradient.opacity = 0
         plays.alpha = 0
+        flash.alpha = 0
     }
 
     override func didUpdateFocus(in context: UIFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
