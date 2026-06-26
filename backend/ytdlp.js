@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process';
-import { YTDLP_CMD, YTDLP_ARGS_PREFIX } from './config.js';
+import { YTDLP_CMD, YTDLP_ARGS_PREFIX, YTDLP_IMPERSONATE } from './config.js';
+import { throttleYtdlp } from './rateLimit.js';
 
 // Run yt-dlp with the given args, capture stdout, parse as JSON.
-function runJson(args) {
+async function runJson(args) {
+  await throttleYtdlp();
   return new Promise((resolve, reject) => {
-    const child = spawn(YTDLP_CMD, [...YTDLP_ARGS_PREFIX, ...args], {
+    const child = spawn(YTDLP_CMD, [...YTDLP_ARGS_PREFIX, ...YTDLP_IMPERSONATE, ...args], {
       windowsHide: true,
     });
     let out = '';
@@ -99,6 +101,10 @@ export async function listUserGrid(username, start, count) {
 // Returns { id, playUrl, author, caption, duration, cover, width, height }
 export async function resolveVideo(url) {
   const info = await runJson(['-J', url]);
+  // yt-dlp can exit 0 and print literal JSON `null` for some unextractable
+  // posts (deleted, private, region/login-gated) instead of a non-zero exit
+  // — that previously crashed the caller with a raw TypeError on `info.id`.
+  if (!info) throw new Error(`yt-dlp returned no data for ${url}`);
   return {
     id: info.id,
     playUrl: pickPlayUrl(info),

@@ -48,3 +48,22 @@ export const MAX_VIDEO_WIDTH = Number(process.env.MAX_VIDEO_WIDTH || 576);
 // How to invoke yt-dlp. We use the pip module form so no separate binary needed.
 export const YTDLP_CMD = process.env.YTDLP_CMD || DEFAULT_PYTHON;
 export const YTDLP_ARGS_PREFIX = process.env.YTDLP_CMD ? [] : ['-m', 'yt_dlp'];
+
+// Spoofs Chrome's TLS/HTTP2 fingerprint (via yt-dlp's curl_cffi backend) so
+// TikTok's signature-based anti-bot checks see what looks like a real
+// browser connection instead of a bare Python HTTP client — this is the
+// difference between a clean response and the "status code 10240" /
+// "Your IP address is blocked" failures we hit during testing. Requires
+// curl_cffi (`pip install curl_cffi`), already a yt-dlp dependency here.
+export const YTDLP_IMPERSONATE = ['--impersonate', 'chrome'];
+
+// TikTok enforces a per-IP rate limit far below what running active playback
+// + background prefetch + feed-resolve + audio-gain-analysis concurrently
+// produces. Each of those already caps its OWN concurrency independently,
+// but nothing previously capped the COMBINED total across all of them —
+// confirmed by an actual IP block during testing, where the real cause
+// wasn't any single subsystem but the sum of all of them hitting TikTok at
+// once. MIN_YTDLP_INTERVAL_MS below paces every yt-dlp launch app-wide
+// through one shared queue (see rateLimit.js) regardless of which subsystem
+// triggered it.
+export const MIN_YTDLP_INTERVAL_MS = Number(process.env.MIN_YTDLP_INTERVAL_MS || 1500);

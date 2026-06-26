@@ -23,8 +23,9 @@ import { fetchProfile } from './profile.js';
 import {
   SOURCES, PER_SOURCE, FEED_TTL_MS, VIDEO_TTL_MS,
   RESOLVE_CONCURRENCY, PORT, FEED_MODE, FORYOU_COUNT,
-  YTDLP_CMD, YTDLP_ARGS_PREFIX, MAX_VIDEO_WIDTH,
+  YTDLP_CMD, YTDLP_ARGS_PREFIX, YTDLP_IMPERSONATE, MAX_VIDEO_WIDTH,
 } from './config.js';
+import { throttleYtdlp } from './rateLimit.js';
 
 // Get a resolved video by id, using cache or a fresh yt-dlp resolve.
 async function getResolved(id) {
@@ -49,17 +50,31 @@ function hlsReady(id) {
   return fs.existsSync(path.join(d, 'index.m3u8')) && fs.existsSync(path.join(d, 's0.ts'));
 }
 
-function ensureHls(id) {
-  if (hlsReady(id)) return Promise.resolve(hlsDir(id));
-  if (hlsJobs.has(id)) return hlsJobs.get(id);
-  const dir = hlsDir(id);
-  fs.mkdirSync(dir, { recursive: true });
-  const playlist = path.join(dir, 'index.m3u8');
+// A single yt-dlp|ffmpeg attempt. Most failures here turned out (confirmed by
+// re-running the exact same pipeline standalone, outside the server, on a
+// clip the live server had just failed twice in a row) to be transient
+// resource contention from several concurrent yt-dlp/ffmpeg process pairs
+// launching at once — NOT a problem with that specific clip. ensureHls below
+// retries this a couple of times for that reason, except for the one failure
+// mode that's genuinely permanent (auth-walled clips, which throw a
+// dedicated AuthRequiredError so the retry loop knows not to bother).
+class AuthRequiredError extends Error {}
+// Distinct from AuthRequiredError: this means TikTok has rate-limited or
+// temporarily blocked OUR IP entirely, not that this one clip needs login.
+// It will fail identically for every clip until the block lifts, so on top
+// of not retrying THIS clip, ensureHls below also stops attempting ANY new
+// clip for a cooldown window — every failed attempt during a block is a
+// wasted request that very plausibly extends how long the block lasts.
+class IpBlockedError extends Error {}
+let ipBlockedUntil = 0;
+const IP_BLOCK_COOLDOWN_MS = 10 * 60 * 1000;   // 10 min
 
-  const p = new Promise((resolve, reject) => {
+async function attemptHls(id, dir, playlist) {
+  await throttleYtdlp();
+  return new Promise((resolve, reject) => {
     if (!FFMPEG) return reject(new Error('ffmpeg required for HLS'));
     const yt = spawn(YTDLP_CMD, [
-      ...YTDLP_ARGS_PREFIX, '-o', '-', '--no-part', '--no-warnings', '--quiet',
+      ...YTDLP_ARGS_PREFIX, ...YTDLP_IMPERSONATE, '-o', '-', '--no-part', '--no-warnings', '--quiet',
       '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/b[vcodec^=h264]/b`,
       `https://www.tiktok.com/@_/video/${id}`,
     ], { windowsHide: true });
@@ -71,30 +86,118 @@ function ensureHls(id) {
     ], { windowsHide: true });
 
     yt.stdout.pipe(ff.stdin);
-    yt.stderr.resume();
+    let yerr = '';
+    let settled = false;
+    // Some clips are permanently unfetchable without an authenticated session
+    // (age/region-gated, "sensitive content", private) — yt-dlp reports this
+    // distinctly and it will fail identically on every retry forever, so
+    // there's no point waiting out the full timeout. Bail the moment we see
+    // it instead of sitting "stuck" for 15s+ before the client even gets a
+    // chance to skip past it.
+    const AUTH_WALL = /Log in for access|Sign in to confirm|private account|This video is unavailable/i;
+    const IP_BLOCKED = /IP address is blocked|status code 10240/i;
+    yt.stderr.on('data', (d) => {
+      yerr += d;
+      if (settled) return;
+      if (IP_BLOCKED.test(yerr)) {
+        settled = true;
+        try { yt.kill(); ff.kill(); } catch {}
+        ipBlockedUntil = Date.now() + IP_BLOCK_COOLDOWN_MS;
+        console.warn(`[hls] TikTok has rate-limited/blocked this IP — pausing all new HLS attempts for ${IP_BLOCK_COOLDOWN_MS / 60000}min. (${id}): ${yerr.slice(-160)}`);
+        reject(new IpBlockedError('ip blocked: ' + yerr.slice(-160)));
+      } else if (AUTH_WALL.test(yerr)) {
+        settled = true;
+        try { yt.kill(); ff.kill(); } catch {}
+        console.warn(`[hls] ${id} requires a logged-in session — skipping (no cookies configured): ${yerr.slice(-160)}`);
+        reject(new AuthRequiredError('auth required: ' + yerr.slice(-160)));
+      }
+    });
     let ferr = '';
     ff.stderr.on('data', (d) => { ferr += d; });
     yt.on('error', () => {});
-    ff.on('error', reject);
+    ff.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
     yt.on('close', () => { try { ff.stdin.end(); } catch {} });
     // The yt-dlp+ffmpeg pair keeps running well past `resolve(dir)` above —
     // resolve only means "first segment ready", not "process finished". This
     // is the ONE true end-of-job signal, and drainPrefetch (below) depends on
     // it firing to let the next queued prefetch start.
-    ff.on('close', () => { hlsJobs.delete(id); drainPrefetch(); });
+    ff.on('close', (code) => {
+      // A non-zero exit means the pipe died mid-stream (TikTok cutting the
+      // connection, a format hiccup, etc.) AFTER the first segment already
+      // made hlsReady(id) true — without this, the half-written playlist
+      // (no #EXT-X-ENDLIST, since ffmpeg never finished) stays cached as
+      // "ready" forever. AVPlayer then treats it as a live stream and waits
+      // indefinitely for segments that will never arrive: a permanently
+      // stuck clip that not even the client's retry can fix, since the retry
+      // just re-fetches the same broken cache. Deleting it here forces the
+      // next request to redo the whole job from scratch instead.
+      if (code !== 0) {
+        console.warn(`[hls] ${id} ffmpeg exited ${code} mid-stream — clearing cache so it retries. ${ferr.slice(-160) || yerr.slice(-160)}`);
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      }
+      drainPrefetch();
+    });
 
     const t0 = Date.now();
+    // Dropped from 30s: most real failures here are TikTok rate-limiting
+    // yt-dlp under concurrent fetches (active clip + background prefetch all
+    // hitting it at once), not a slow-but-working download — those fail fast.
+    // 30s just meant a stuck clip sat frozen that long before the client's
+    // one retry even got a chance, on top of another 30s if the retry also
+    // hit the same rate limit. Logging yt-dlp's own stderr (previously
+    // discarded) so a stuck clip is diagnosable instead of a silent 500.
+    const TIMEOUT_MS = 15000;
     const iv = setInterval(() => {
+      if (settled) { clearInterval(iv); return; }
       if (hlsReady(id)) { clearInterval(iv); resolve(dir); }
-      else if (Date.now() - t0 > 30000) {
+      else if (Date.now() - t0 > TIMEOUT_MS) {
         clearInterval(iv);
+        settled = true;
         try { yt.kill(); ff.kill(); } catch {}
-        reject(new Error('hls timeout: ' + ferr.slice(-160)));
+        const detail = `yt-dlp: ${yerr.slice(-200) || '(no output)'} | ffmpeg: ${ferr.slice(-160) || '(no output)'}`;
+        console.warn(`[hls] ${id} timed out after ${TIMEOUT_MS}ms — ${detail}`);
+        reject(new Error('hls timeout: ' + detail));
       }
     }, 150);
   });
+}
+
+function ensureHls(id) {
+  if (hlsReady(id)) return Promise.resolve(hlsDir(id));
+  if (Date.now() < ipBlockedUntil) {
+    const mins = Math.ceil((ipBlockedUntil - Date.now()) / 60000);
+    return Promise.reject(new IpBlockedError(`ip blocked, ${mins}min remaining on cooldown`));
+  }
+  if (hlsJobs.has(id)) return hlsJobs.get(id);
+  const dir = hlsDir(id);
+  const playlist = path.join(dir, 'index.m3u8');
+
+  const ATTEMPTS = 3;
+  const p = (async () => {
+    let lastErr;
+    for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+      if (Date.now() < ipBlockedUntil) throw new IpBlockedError('ip blocked mid-retry');
+      fs.mkdirSync(dir, { recursive: true });
+      try {
+        return await attemptHls(id, dir, playlist);
+      } catch (e) {
+        lastErr = e;
+        // Permanent failures — retrying never helps, so bail immediately.
+        if (e instanceof AuthRequiredError || e instanceof IpBlockedError) throw e;
+        if (attempt < ATTEMPTS) {
+          console.warn(`[hls] ${id} attempt ${attempt}/${ATTEMPTS} failed, retrying: ${String(e).slice(0, 120)}`);
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+    }
+    throw lastErr;
+  })();
   hlsJobs.set(id, p);
-  p.catch(() => { hlsJobs.delete(id); });
+  // .then(onFulfilled, onRejected) rather than .finally — .finally's returned
+  // promise re-throws on rejection, and since nothing awaits THAT promise
+  // (only the original `p`, returned below and handled by the caller), it'd
+  // show up as a separate unhandled rejection warning for no reason.
+  p.then(() => hlsJobs.delete(id), () => hlsJobs.delete(id));
   return p;
 }
 
@@ -169,11 +272,12 @@ function drainGainQueue() {
   }
 }
 
-function runGainAnalysis(id) {
+async function runGainAnalysis(id) {
+  await throttleYtdlp();
   return new Promise((resolve) => {
     if (!FFMPEG) return resolve(0);
     const yt = spawn(YTDLP_CMD, [
-      ...YTDLP_ARGS_PREFIX, '-o', '-', '--no-part', '--no-warnings', '--quiet',
+      ...YTDLP_ARGS_PREFIX, ...YTDLP_IMPERSONATE, '-o', '-', '--no-part', '--no-warnings', '--quiet',
       '-f', `b[vcodec^=h264][width<=${MAX_VIDEO_WIDTH}]/b[vcodec^=h264]/b`,
       `https://www.tiktok.com/@_/video/${id}`,
     ], { windowsHide: true });
@@ -535,16 +639,20 @@ setInterval(cleanupTemp, 30 * 60 * 1000).unref();
 const PREWARM_COUNT = Number(process.env.PREWARM_COUNT || 8);
 
 // Download a list of ids with limited concurrency, reporting progress.
+// Returns the ids that actually failed, so the caller can report real
+// success/failure counts instead of a flat "done" that hides errors.
 async function prewarmClips(ids, concurrency, onProgress) {
   let next = 0, done = 0;
+  const failed = [];
   async function worker() {
     while (next < ids.length) {
       const id = ids[next++];
-      try { await ensureHls(id); } catch {}
+      try { await ensureHls(id); } catch { failed.push(id); }
       onProgress(++done, ids.length);
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, worker));
+  return failed;
 }
 
 // Pre-warm on startup: scrape the feed AND download the first clips NOW, so when
@@ -561,13 +669,19 @@ async function prewarmOnStartup() {
   }
   const n = Math.min(items.length, PREWARM_COUNT);
   console.log(`📋  Feed ready: ${items.length} videos. Preloading first ${n} clips…`);
-  await prewarmClips(
+  const failed = await prewarmClips(
     items.slice(0, n).map((x) => x.id),
     PREFETCH_CONCURRENCY,
     (d, total) => process.stdout.write(`\r    downloaded ${d}/${total} clips…   `)
   );
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`\n✅  READY in ${secs}s — open the app now (${n} videos preloaded).\n`);
+  const ok = n - failed.length;
+  console.log(`\n✅  READY in ${secs}s — ${ok}/${n} clips preloaded, open the app now.`);
+  if (failed.length) {
+    console.log(`⚠️  ${failed.length} failed to preload (will retry on demand when played): ${failed.join(', ')}\n`);
+  } else {
+    console.log('');
+  }
 }
 
 server.listen(PORT, () => {
