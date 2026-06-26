@@ -9,8 +9,13 @@ enum API {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    static func profile(_ username: String) async -> ProfileResponse? {
-        try? await get("api/profile/\(username)") as ProfileResponse
+    /// Header-only fetch (name/avatar/bio/stats) — backed by a slow cold-start
+    /// Playwright scrape, so it gets a tighter timeout than the default 90s:
+    /// the profile screen renders its video grid from `userVideos` first and
+    /// fills the header in whenever this resolves, so a timeout here just means
+    /// a blank header rather than a stuck spinner.
+    static func profile(_ username: String, timeout: TimeInterval = 20) async -> ProfileResponse? {
+        try? await get("api/profile/\(username)", timeout: timeout) as ProfileResponse
     }
 
     static func userVideos(_ username: String, start: Int) async -> [FeedItem] {

@@ -154,8 +154,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
             avatar.heightAnchor.constraint(equalToConstant: 160),
 
             header.topAnchor.constraint(equalTo: backChip.bottomAnchor, constant: 6),
-            header.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
-            header.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -sideInset),
+            header.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: sideInset),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -sideInset),
         ])
         return header
     }
@@ -169,8 +169,8 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .vertical
-        layout.minimumInteritemSpacing = gridSpacing   // 40pt, horizontal — Apple's spec
-        layout.minimumLineSpacing = rowSpacing         // 100pt, vertical — Apple's spec
+        layout.minimumInteritemSpacing = gridSpacing   // 30pt, horizontal
+        layout.minimumLineSpacing = rowSpacing         // 64pt, vertical
         grid = UICollectionView(frame: .zero, collectionViewLayout: layout)
         grid.backgroundColor = .clear
         grid.contentInsetAdjustmentBehavior = .never
@@ -184,10 +184,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         // being clipped at the grid's edges. Apple's HIG only says "provide
         // enough spacing between the bottom of the title and the top of the
         // unfocused items to avoid crowding" — no fixed number, so this is sized
-        // for OUR actual focus effect: a 729pt-tall card growing 1.05x moves its
-        // top edge up ~18pt when focused, plus the shadow (radius 20) spreads
-        // further still. 50pt of top inset comfortably absorbs both with margin
-        // to spare, so a focused first-row card never visually crowds "Videos".
+        // for OUR actual focus effect: a 480pt-tall card (cardWidth 270 * 16/9)
+        // growing 1.05x moves its top edge up ~12pt when focused, plus the
+        // shadow (radius 20) spreads further still. 50pt of top inset comfortably
+        // absorbs both with margin to spare, so a focused first-row card never
+        // visually crowds "Videos".
         grid.clipsToBounds = false
         // sectionInset (UICollectionViewFlowLayout), not contentInset (UIScrollView)
         // — sectionInset is the layout's own margin around a section's cells, the
@@ -201,11 +202,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
         NSLayoutConstraint.activate([
             videosTitle.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 28),
-            videosTitle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: sideInset),
+            videosTitle.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: sideInset),
             grid.topAnchor.constraint(equalTo: videosTitle.bottomAnchor, constant: 12),
-            grid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            grid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            grid.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            grid.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            grid.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            grid.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
         ])
     }
 
@@ -237,22 +238,58 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
 
     private func load() {
         spinner.startAnimating()
+        errorView.isHidden = true
+
+        // Render the grid as soon as the fast yt-dlp listing returns, instead of
+        // waiting on /api/profile's slow cold-start Playwright header scrape —
+        // the header fills in separately whenever it arrives (or stays blank on
+        // timeout/failure, rather than blocking the whole screen).
         Task { @MainActor in
-            let data = await API.profile(username)
+            let grid = await API.userVideos(username, start: 0)
             spinner.stopAnimating()
-            guard let data else { return }
-            user = data.user
-            videos = data.videos
-            applyHeader()
-            grid.reloadData()
+            if grid.isEmpty {
+                showError()
+                return
+            }
+            videos = grid
+            nameLabel.text = username
+            handleLabel.text = username
+            self.grid.reloadData()
             setNeedsFocusUpdate()      // hand focus from the fallback to the first poster
             updateFocusIfNeeded()
-
             UIView.animate(withDuration: 0.25) {
                 [self.headerView, self.videosTitle, self.grid].forEach { $0?.alpha = 1 }
             }
         }
+        Task { @MainActor in
+            guard let data = await API.profile(username) else { return }
+            user = data.user
+            applyHeader()
+        }
     }
+
+    private func showError() {
+        errorView.isHidden = false
+    }
+
+    private lazy var errorView: UIView = {
+        let label = UILabel()
+        label.text = "Couldn't load this profile."
+        label.font = .app(ofSize: 24, weight: .medium)
+        label.textColor = .white
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 120),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -120),
+        ])
+        label.isHidden = true
+        return label
+    }()
 
     private func applyHeader() {
         avatar.setImage(user?.avatar)
@@ -266,11 +303,11 @@ final class ProfileViewController: UIViewController, UICollectionViewDataSource,
         bioLabel.isHidden = (user?.signature?.isEmpty != false)
     }
 
-    // Apple's spec gives a FIXED unfocused card width (410pt) for a four-column
-    // grid, calibrated for the 1920pt reference canvas — not derived by dividing
-    // the screen width. Height follows from the cover's true 9:16 video-frame
-    // ratio. The "next row peeks in" effect comes for free from the grid simply
-    // scrolling past the viewport edge — no artificial shrinking needed.
+    // Fixed unfocused card width (270pt) for our 6-column density, calibrated
+    // for the 1920pt reference canvas — not derived by dividing the screen
+    // width. Height follows from the cover's true 9:16 video-frame ratio. The
+    // "next row peeks in" effect comes for free from the grid simply scrolling
+    // past the viewport edge — no artificial shrinking needed.
     func collectionView(_ cv: UICollectionView, layout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
         CGSize(width: cardWidth, height: cardWidth * 16.0 / 9.0)
@@ -440,6 +477,7 @@ final class GridCell: UICollectionViewCell {
     // look (scaled, shadowed, bordered) on a different video after scrolling.
     override func prepareForReuse() {
         super.prepareForReuse()
+        cover.cancel()
         transform = .identity
         layer.shadowOpacity = 0
         contentView.layer.borderWidth = 0

@@ -16,12 +16,19 @@ struct TikTokTVApp: App {
 
 struct ContentView: View {
     @StateObject private var service = FeedService()
+    @State private var showSettings = !Config.hasCustomServer
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if !service.items.isEmpty {
+            if showSettings {
+                SettingsView { address in
+                    Config.setBackendBaseURL(address)
+                    showSettings = false
+                    Task { await service.load() }
+                }
+            } else if !service.items.isEmpty {
                 VerticalFeedView(items: service.items,
                                  loadMore: { await service.loadMore() })
                     .ignoresSafeArea()
@@ -29,8 +36,11 @@ struct ContentView: View {
                 VStack(spacing: 16) {
                     Text("Couldn't load feed").font(.title2).bold()
                     Text(err).font(.callout).foregroundStyle(.secondary)
-                    Text("Check Config.backendBaseURL and that the backend is running.")
+                    Text("Server: \(Config.backendBaseURLString)")
                         .font(.footnote).foregroundStyle(.secondary)
+                    Button("Change Server") { showSettings = true }
+                        .buttonStyle(.bordered)
+                        .padding(.top, 8)
                 }
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
@@ -40,7 +50,7 @@ struct ContentView: View {
             }
         }
         .task {
-            await service.load()
+            if !showSettings { await service.load() }
         }
     }
 }

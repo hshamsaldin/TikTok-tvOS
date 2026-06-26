@@ -529,6 +529,7 @@ final class VideoCell: UICollectionViewCell {
         teardownPlayer()
         currentID = nil
         fillWidth.constant = 0
+        bgImage.cancel()
         bgImage.image = nil
         muteIcon.isHidden = true
         loadingSpinner.stopAnimating()

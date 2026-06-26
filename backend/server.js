@@ -65,7 +65,7 @@ function ensureHls(id) {
     ], { windowsHide: true });
     const ff = spawn(FFMPEG, [
       '-y', '-i', 'pipe:0', '-c', 'copy',
-      '-f', 'hls', '-hls_time', '3', '-hls_list_size', '0',
+      '-f', 'hls', '-hls_time', '1', '-hls_list_size', '0',
       '-hls_flags', 'independent_segments+temp_file',
       '-hls_segment_filename', path.join(dir, 's%d.ts'), playlist,
     ], { windowsHide: true });
